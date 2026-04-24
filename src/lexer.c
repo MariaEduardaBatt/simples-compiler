@@ -65,6 +65,51 @@ static TokenType lexer_keyword_type(const char *start, size_t length) {
     if (lexer_span_is(start, length, "div")) {
         return TOK_DIV;
     }
+    if (lexer_span_is(start, length, "se")) {
+        return TOK_SE;
+    }
+    if (lexer_span_is(start, length, "entao")) {
+        return TOK_ENTAO;
+    }
+    if (lexer_span_is(start, length, "senao")) {
+        return TOK_SENAO;
+    }
+    if (lexer_span_is(start, length, "fimse")) {
+        return TOK_FIMSE;
+    }
+    if (lexer_span_is(start, length, "enquanto")) {
+        return TOK_ENQUANTO;
+    }
+    if (lexer_span_is(start, length, "fimenquanto")) {
+        return TOK_FIMENQUANTO;
+    }
+    if (lexer_span_is(start, length, "para")) {
+        return TOK_PARA;
+    }
+    if (lexer_span_is(start, length, "de")) {
+        return TOK_DE;
+    }
+    if (lexer_span_is(start, length, "ate")) {
+        return TOK_ATE;
+    }
+    if (lexer_span_is(start, length, "passo")) {
+        return TOK_PASSO;
+    }
+    if (lexer_span_is(start, length, "faca")) {
+        return TOK_FACA;
+    }
+    if (lexer_span_is(start, length, "fimpara")) {
+        return TOK_FIMPARA;
+    }
+    if (lexer_span_is(start, length, "e")) {
+        return TOK_E;
+    }
+    if (lexer_span_is(start, length, "ou")) {
+        return TOK_OU;
+    }
+    if (lexer_span_is(start, length, "nao")) {
+        return TOK_NAO;
+    }
 
     return TOK_ID;
 }
@@ -169,6 +214,52 @@ bool lexer_scan(const char *source, TokenList *out_tokens, CompilerError *error)
         }
 
         switch (current) {
+            case '>':
+                if (state.source[state.index + 1] == '=') {
+                    if (!lexer_push_span(out_tokens, TOK_MAIOR_IGUAL, state.source + state.index, 2, token_line, token_column)) {
+                        lexer_fail(out_tokens, error, token_line, token_column, "Falha ao registrar token.");
+                        return false;
+                    }
+                    lexer_advance(&state);
+                    lexer_advance(&state);
+                } else {
+                    if (!lexer_push_span(out_tokens, TOK_MAIOR, state.source + state.index, 1, token_line, token_column)) {
+                        lexer_fail(out_tokens, error, token_line, token_column, "Falha ao registrar token.");
+                        return false;
+                    }
+                    lexer_advance(&state);
+                }
+                break;
+            case '<':
+                if (state.source[state.index + 1] == '>') {
+                    if (!lexer_push_span(out_tokens, TOK_DIFERENTE, state.source + state.index, 2, token_line, token_column)) {
+                        lexer_fail(out_tokens, error, token_line, token_column, "Falha ao registrar token.");
+                        return false;
+                    }
+                    lexer_advance(&state);
+                    lexer_advance(&state);
+                } else if (state.source[state.index + 1] == '=') {
+                    if (!lexer_push_span(out_tokens, TOK_MENOR_IGUAL, state.source + state.index, 2, token_line, token_column)) {
+                        lexer_fail(out_tokens, error, token_line, token_column, "Falha ao registrar token.");
+                        return false;
+                    }
+                    lexer_advance(&state);
+                    lexer_advance(&state);
+                } else {
+                    if (!lexer_push_span(out_tokens, TOK_MENOR, state.source + state.index, 1, token_line, token_column)) {
+                        lexer_fail(out_tokens, error, token_line, token_column, "Falha ao registrar token.");
+                        return false;
+                    }
+                    lexer_advance(&state);
+                }
+                break;
+            case '=':
+                if (!lexer_push_span(out_tokens, TOK_IGUAL, state.source + state.index, 1, token_line, token_column)) {
+                    lexer_fail(out_tokens, error, token_line, token_column, "Falha ao registrar token.");
+                    return false;
+                }
+                lexer_advance(&state);
+                break;
             case '+':
                 if (!lexer_push_span(out_tokens, TOK_MAIS, state.source + state.index, 1, token_line, token_column)) {
                     lexer_fail(out_tokens, error, token_line, token_column, "Falha ao registrar token.");

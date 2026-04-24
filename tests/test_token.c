@@ -9,6 +9,11 @@ void test_token_type_name_returns_keyword_name(void) {
     TEST_ASSERT_EQUAL_STRING("TOK_PROGRAMA", token_type_name(TOK_PROGRAMA));
 }
 
+void test_token_type_name_returns_control_flow_name(void) {
+    TEST_ASSERT_EQUAL_STRING("TOK_SE", token_type_name(TOK_SE));
+    TEST_ASSERT_EQUAL_STRING("TOK_FIMPARA", token_type_name(TOK_FIMPARA));
+}
+
 void test_token_list_grows_and_preserves_all_entries_after_growth(void) {
     TokenList list;
     char lexemes[][16] = {"alpha", "beta", "gamma", "delta", "epsilon"};
@@ -44,6 +49,7 @@ void test_token_list_grows_and_preserves_all_entries_after_growth(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_token_type_name_returns_keyword_name);
+    RUN_TEST(test_token_type_name_returns_control_flow_name);
     RUN_TEST(test_token_list_grows_and_preserves_all_entries_after_growth);
     return UNITY_END();
 }
