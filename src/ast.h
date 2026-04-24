@@ -83,7 +83,6 @@ typedef struct {
     size_t then_count;
     ASTCommand *else_commands;
     size_t else_count;
-    bool has_else;
 } ASTIfCommand;
 
 struct ASTCommand {

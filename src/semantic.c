@@ -141,7 +141,7 @@ static bool analyze_command(const ASTCommand *command, const SymbolTable *symbol
         case AST_COMMAND_IF:
             return analyze_expression(command->if_command.condition, symbols, error) &&
                    analyze_command_list(command->if_command.then_commands, command->if_command.then_count, symbols, error) &&
-                   (!command->if_command.has_else ||
+                   (command->if_command.else_count == 0 ||
                     analyze_command_list(command->if_command.else_commands, command->if_command.else_count, symbols, error));
         default:
             return semantic_fail(error, "Comando invalido.");

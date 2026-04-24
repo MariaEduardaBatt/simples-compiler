@@ -563,7 +563,6 @@ static bool parse_command(Parser *parser, ASTCommand *command, CompilerError *er
         }
 
         if (parser_match(parser, TOK_SENAO)) {
-            command->if_command.has_else = true;
             if (!parse_command_list(
                     parser,
                     &command->if_command.else_commands,

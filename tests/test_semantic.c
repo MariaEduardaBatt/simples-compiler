@@ -196,6 +196,27 @@ void test_semantic_rejects_undeclared_identifier_inside_if_condition(void) {
     token_list_free(&tokens);
 }
 
+void test_semantic_uses_else_count_as_source_of_truth_for_if_else(void) {
+    ASTDeclaration declaration = {.name = "x", .line = 1, .column = 1};
+    ASTExpression condition = {.type = AST_EXPR_INT, .line = 1, .column = 1, .int_value = 1};
+    ASTExpression else_expression = {.type = AST_EXPR_IDENTIFIER, .line = 1, .column = 1, .identifier = "y"};
+    ASTCommand else_command = {.type = AST_COMMAND_WRITE, .write = {.expression = &else_expression}};
+    ASTCommand if_command = {.type = AST_COMMAND_IF,
+                             .if_command = {.condition = &condition,
+                                            .then_commands = NULL,
+                                            .then_count = 0,
+                                            .else_commands = &else_command,
+                                            .else_count = 1}};
+    ASTProgram program = {.name = "demo", .declarations = &declaration, .declaration_count = 1, .commands = &if_command, .command_count = 1};
+    SymbolTable symbols = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(&program, &symbols, &error));
+    TEST_ASSERT_EQUAL_STRING("Identificador 'y' nao declarado.", error.message);
+
+    symbol_table_free(&symbols);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_semantic_rejects_duplicate_declarations);
@@ -206,5 +227,6 @@ int main(void) {
     RUN_TEST(test_semantic_rejects_undeclared_identifier_inside_unary_expression);
     RUN_TEST(test_semantic_accepts_declared_variables_and_collects_symbols);
     RUN_TEST(test_semantic_rejects_undeclared_identifier_inside_if_condition);
+    RUN_TEST(test_semantic_uses_else_count_as_source_of_truth_for_if_else);
     return UNITY_END();
 }

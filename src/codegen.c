@@ -222,7 +222,7 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command)
                 return false;
             }
 
-            if (command->if_command.has_else) {
+            if (command->if_command.else_count > 0) {
                 return builder_appendf(builder, "    je .Lelse%zu\n", label_id) &&
                        generate_command_block(context, command->if_command.then_commands, command->if_command.then_count) &&
                        builder_appendf(builder, "    jmp .Lendif%zu\n", label_id) &&
