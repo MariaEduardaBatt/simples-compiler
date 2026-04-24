@@ -181,6 +181,21 @@ void test_semantic_accepts_declared_variables_and_collects_symbols(void) {
     token_list_free(&tokens);
 }
 
+void test_semantic_rejects_undeclared_identifier_inside_if_condition(void) {
+    const char *source = "programa demo inteiro x; inicio se y > 0 entao escreva x; fimse fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SymbolTable symbols = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &symbols, &error));
+    TEST_ASSERT_EQUAL_STRING("Identificador 'y' nao declarado.", error.message);
+
+    symbol_table_free(&symbols);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_semantic_rejects_duplicate_declarations);
@@ -190,5 +205,6 @@ int main(void) {
     RUN_TEST(test_semantic_accepts_unary_integer_and_identifier_expressions);
     RUN_TEST(test_semantic_rejects_undeclared_identifier_inside_unary_expression);
     RUN_TEST(test_semantic_accepts_declared_variables_and_collects_symbols);
+    RUN_TEST(test_semantic_rejects_undeclared_identifier_inside_if_condition);
     return UNITY_END();
 }

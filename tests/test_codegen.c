@@ -140,6 +140,17 @@ void test_codegen_returns_null_when_symbol_fallback_has_no_declarations(void) {
     TEST_ASSERT_NULL(codegen_generate_program(&program, &symbols));
 }
 
+void test_codegen_emits_labels_and_jump_for_if_else(void) {
+    char *assembly =
+        generate_source("programa demo inteiro x; inicio x <- 1; se x > 0 entao escreva x; senao escreval 0; fimse fim");
+
+    assert_contains(assembly, "cmp eax, 0");
+    assert_contains(assembly, "je .Lelse0");
+    assert_contains(assembly, "jmp .Lendif0");
+
+    free(assembly);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_codegen_emits_direct_store_for_integer_assignment);
@@ -151,5 +162,6 @@ int main(void) {
     RUN_TEST(test_codegen_emits_unary_negation_and_logical_not_sequences);
     RUN_TEST(test_codegen_uses_program_declarations_when_symbol_names_are_missing);
     RUN_TEST(test_codegen_returns_null_when_symbol_fallback_has_no_declarations);
+    RUN_TEST(test_codegen_emits_labels_and_jump_for_if_else);
     return UNITY_END();
 }

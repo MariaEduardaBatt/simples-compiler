@@ -165,16 +165,16 @@ static bool parser_append_declaration(ASTProgram *program, ASTDeclaration declar
     return true;
 }
 
-static bool parser_append_command(ASTProgram *program, ASTCommand command) {
+static bool parser_append_command(ASTCommand **commands, size_t *count, ASTCommand command) {
     ASTCommand *items;
 
-    items = realloc(program->commands, (program->command_count + 1) * sizeof(*program->commands));
+    items = realloc(*commands, (*count + 1) * sizeof(**commands));
     if (items == NULL) {
         return false;
     }
 
-    program->commands = items;
-    program->commands[program->command_count++] = command;
+    *commands = items;
+    (*commands)[(*count)++] = command;
     return true;
 }
 
@@ -183,6 +183,52 @@ static bool parser_oom(const Parser *parser, CompilerError *error) {
 }
 
 static ASTExpression *parse_expression(Parser *parser, CompilerError *error);
+static bool parse_command(Parser *parser, ASTCommand *command, CompilerError *error);
+
+static bool parser_command_requires_semicolon(ASTCommandType type) {
+    return type == AST_COMMAND_ASSIGNMENT || type == AST_COMMAND_WRITE || type == AST_COMMAND_WRITELN;
+}
+
+static bool parser_is_terminator(const Parser *parser, const TokenType *terminators, size_t terminator_count) {
+    size_t index;
+
+    for (index = 0; index < terminator_count; ++index) {
+        if (parser_check(parser, terminators[index])) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool parse_command_list(
+    Parser *parser,
+    ASTCommand **commands,
+    size_t *command_count,
+    const TokenType *terminators,
+    size_t terminator_count,
+    CompilerError *error) {
+    while (!parser_is_terminator(parser, terminators, terminator_count) && !parser_check(parser, TOK_EOF)) {
+        ASTCommand command;
+
+        if (!parse_command(parser, &command, error)) {
+            return false;
+        }
+
+        if (parser_command_requires_semicolon(command.type) &&
+            !parser_expect(parser, TOK_PONTO_VIRGULA, error, "Esperado ';' apos comando.")) {
+            ast_command_free(&command);
+            return false;
+        }
+
+        if (!parser_append_command(commands, command_count, command)) {
+            ast_command_free(&command);
+            return parser_oom(parser, error);
+        }
+    }
+
+    return true;
+}
 
 static ASTExpression *parse_factor(Parser *parser, CompilerError *error) {
     const Token *token;
@@ -489,34 +535,62 @@ static bool parse_command(Parser *parser, ASTCommand *command, CompilerError *er
         return true;
     }
 
-    return parser_fail_current(parser, error, "Esperado comando.");
-}
+    if (parser_match(parser, TOK_SE)) {
+        static const TokenType then_terminators[] = {TOK_SENAO, TOK_FIMSE};
+        static const TokenType else_terminators[] = {TOK_FIMSE};
 
-static bool parse_command_list(Parser *parser, ASTProgram *program, CompilerError *error) {
-    while (!parser_check(parser, TOK_FIM) && !parser_check(parser, TOK_EOF)) {
-        ASTCommand command;
-
-        if (!parse_command(parser, &command, error)) {
+        command->type = AST_COMMAND_IF;
+        command->if_command.condition = parse_expression(parser, error);
+        if (command->if_command.condition == NULL) {
+            ast_command_free(command);
             return false;
         }
 
-        if (!parser_expect(parser, TOK_PONTO_VIRGULA, error, "Esperado ';' apos comando.")) {
-            ast_command_free(&command);
+        if (!parser_expect(parser, TOK_ENTAO, error, "Esperado 'entao'.")) {
+            ast_command_free(command);
             return false;
         }
 
-        if (!parser_append_command(program, command)) {
-            ast_command_free(&command);
-            return parser_oom(parser, error);
+        if (!parse_command_list(
+                parser,
+                &command->if_command.then_commands,
+                &command->if_command.then_count,
+                then_terminators,
+                sizeof(then_terminators) / sizeof(then_terminators[0]),
+                error)) {
+            ast_command_free(command);
+            return false;
         }
+
+        if (parser_match(parser, TOK_SENAO)) {
+            command->if_command.has_else = true;
+            if (!parse_command_list(
+                    parser,
+                    &command->if_command.else_commands,
+                    &command->if_command.else_count,
+                    else_terminators,
+                    sizeof(else_terminators) / sizeof(else_terminators[0]),
+                    error)) {
+                ast_command_free(command);
+                return false;
+            }
+        }
+
+        if (!parser_expect(parser, TOK_FIMSE, error, "Esperado 'fimse'.")) {
+            ast_command_free(command);
+            return false;
+        }
+
+        return true;
     }
 
-    return true;
+    return parser_fail_current(parser, error, "Esperado comando.");
 }
 
 bool parse_program(const TokenList *tokens, ASTProgram **out_program, CompilerError *error) {
     Parser parser = {.tokens = tokens, .current = 0};
     ASTProgram *program;
+    static const TokenType command_terminators[] = {TOK_FIM};
 
     if (out_program == NULL) {
         compiler_error_set(error, COMPILER_PHASE_PARSER, 1, 1, "Saida invalida.");
@@ -551,7 +625,13 @@ bool parse_program(const TokenList *tokens, ASTProgram **out_program, CompilerEr
 
     if (!parse_declaration_list(&parser, program, error) ||
         !parser_expect(&parser, TOK_INICIO, error, "Esperado 'inicio'.") ||
-        !parse_command_list(&parser, program, error) ||
+        !parse_command_list(
+            &parser,
+            &program->commands,
+            &program->command_count,
+            command_terminators,
+            sizeof(command_terminators) / sizeof(command_terminators[0]),
+            error) ||
         !parser_expect(&parser, TOK_FIM, error, "Esperado 'fim'.") ||
         !parser_expect(&parser, TOK_EOF, error, "Esperado fim do arquivo.")) {
         ast_program_free(program);

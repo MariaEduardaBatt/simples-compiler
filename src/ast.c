@@ -40,6 +40,20 @@ void ast_command_free(ASTCommand *command) {
         case AST_COMMAND_WRITELN:
             ast_expression_free(command->write.expression);
             break;
+        case AST_COMMAND_IF: {
+            size_t index;
+
+            ast_expression_free(command->if_command.condition);
+            for (index = 0; index < command->if_command.then_count; ++index) {
+                ast_command_free(&command->if_command.then_commands[index]);
+            }
+            free(command->if_command.then_commands);
+            for (index = 0; index < command->if_command.else_count; ++index) {
+                ast_command_free(&command->if_command.else_commands[index]);
+            }
+            free(command->if_command.else_commands);
+            break;
+        }
         default:
             break;
     }

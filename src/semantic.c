@@ -126,6 +126,9 @@ static bool analyze_expression(const ASTExpression *expression, const SymbolTabl
     }
 }
 
+static bool analyze_command_list(
+    const ASTCommand *commands, size_t command_count, const SymbolTable *symbols, CompilerError *error);
+
 static bool analyze_command(const ASTCommand *command, const SymbolTable *symbols, CompilerError *error) {
     switch (command->type) {
         case AST_COMMAND_ASSIGNMENT:
@@ -135,9 +138,27 @@ static bool analyze_command(const ASTCommand *command, const SymbolTable *symbol
         case AST_COMMAND_WRITE:
         case AST_COMMAND_WRITELN:
             return analyze_expression(command->write.expression, symbols, error);
+        case AST_COMMAND_IF:
+            return analyze_expression(command->if_command.condition, symbols, error) &&
+                   analyze_command_list(command->if_command.then_commands, command->if_command.then_count, symbols, error) &&
+                   (!command->if_command.has_else ||
+                    analyze_command_list(command->if_command.else_commands, command->if_command.else_count, symbols, error));
         default:
             return semantic_fail(error, "Comando invalido.");
     }
+}
+
+static bool analyze_command_list(
+    const ASTCommand *commands, size_t command_count, const SymbolTable *symbols, CompilerError *error) {
+    size_t index;
+
+    for (index = 0; index < command_count; ++index) {
+        if (!analyze_command(&commands[index], symbols, error)) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 bool analyze_program(const ASTProgram *program, SymbolTable *out_symbols, CompilerError *error) {
@@ -171,11 +192,9 @@ bool analyze_program(const ASTProgram *program, SymbolTable *out_symbols, Compil
         }
     }
 
-    for (index = 0; index < program->command_count; ++index) {
-        if (!analyze_command(&program->commands[index], &symbols, error)) {
-            symbol_table_free(&symbols);
-            return false;
-        }
+    if (!analyze_command_list(program->commands, program->command_count, &symbols, error)) {
+        symbol_table_free(&symbols);
+        return false;
     }
 
     *out_symbols = symbols;

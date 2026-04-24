@@ -1,6 +1,7 @@
 #ifndef AST_H
 #define AST_H
 
+#include <stdbool.h>
 #include <stddef.h>
 
 typedef enum {
@@ -31,6 +32,7 @@ typedef enum {
 } ASTBinaryOp;
 
 typedef struct ASTExpression ASTExpression;
+typedef struct ASTCommand ASTCommand;
 
 struct ASTExpression {
     ASTExpressionType type;
@@ -60,7 +62,8 @@ typedef struct {
 typedef enum {
     AST_COMMAND_ASSIGNMENT,
     AST_COMMAND_WRITE,
-    AST_COMMAND_WRITELN
+    AST_COMMAND_WRITELN,
+    AST_COMMAND_IF
 } ASTCommandType;
 
 typedef struct {
@@ -75,12 +78,22 @@ typedef struct {
 } ASTWriteCommand;
 
 typedef struct {
+    ASTExpression *condition;
+    ASTCommand *then_commands;
+    size_t then_count;
+    ASTCommand *else_commands;
+    size_t else_count;
+    bool has_else;
+} ASTIfCommand;
+
+struct ASTCommand {
     ASTCommandType type;
     union {
         ASTAssignmentCommand assignment;
         ASTWriteCommand write;
+        ASTIfCommand if_command;
     };
-} ASTCommand;
+};
 
 typedef struct {
     char *name;

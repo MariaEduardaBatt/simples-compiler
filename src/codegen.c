@@ -12,6 +12,11 @@ typedef struct {
     size_t capacity;
 } StringBuilder;
 
+typedef struct {
+    StringBuilder *builder;
+    size_t next_label_id;
+} CodegenContext;
+
 static bool builder_reserve(StringBuilder *builder, size_t extra_length) {
     size_t required_length;
     size_t new_capacity;
@@ -107,6 +112,18 @@ static size_t symbol_count(const ASTProgram *program, const SymbolTable *symbols
     return 0;
 }
 
+static bool builder_append_booleanize(StringBuilder *builder, const char *register_name, const char *byte_register_name) {
+    return builder_appendf(
+        builder,
+        "    cmp %s, 0\n"
+        "    setne %s\n"
+        "    movzx %s, %s\n",
+        register_name,
+        byte_register_name,
+        register_name,
+        byte_register_name);
+}
+
 static bool generate_expression(StringBuilder *builder, const ASTExpression *expression) {
     if (expression == NULL) {
         return false;
@@ -148,6 +165,26 @@ static bool generate_expression(StringBuilder *builder, const ASTExpression *exp
                     return builder_append(builder, "    imul eax, ebx\n");
                 case AST_BINARY_DIV:
                     return builder_append(builder, "    cdq\n    idiv ebx\n");
+                case AST_BINARY_GT:
+                    return builder_append(builder, "    cmp eax, ebx\n    setg al\n    movzx eax, al\n");
+                case AST_BINARY_LT:
+                    return builder_append(builder, "    cmp eax, ebx\n    setl al\n    movzx eax, al\n");
+                case AST_BINARY_EQ:
+                    return builder_append(builder, "    cmp eax, ebx\n    sete al\n    movzx eax, al\n");
+                case AST_BINARY_NE:
+                    return builder_append(builder, "    cmp eax, ebx\n    setne al\n    movzx eax, al\n");
+                case AST_BINARY_GE:
+                    return builder_append(builder, "    cmp eax, ebx\n    setge al\n    movzx eax, al\n");
+                case AST_BINARY_LE:
+                    return builder_append(builder, "    cmp eax, ebx\n    setle al\n    movzx eax, al\n");
+                case AST_BINARY_AND:
+                    return builder_append_booleanize(builder, "eax", "al") &&
+                           builder_append_booleanize(builder, "ebx", "bl") &&
+                           builder_append(builder, "    and eax, ebx\n");
+                case AST_BINARY_OR:
+                    return builder_append_booleanize(builder, "eax", "al") &&
+                           builder_append_booleanize(builder, "ebx", "bl") &&
+                           builder_append(builder, "    or eax, ebx\n");
                 default:
                     return false;
             }
@@ -156,7 +193,11 @@ static bool generate_expression(StringBuilder *builder, const ASTExpression *exp
     }
 }
 
-static bool generate_command(StringBuilder *builder, const ASTCommand *command) {
+static bool generate_command_block(CodegenContext *context, const ASTCommand *commands, size_t command_count);
+
+static bool generate_command(CodegenContext *context, const ASTCommand *command) {
+    StringBuilder *builder = context->builder;
+
     switch (command->type) {
         case AST_COMMAND_ASSIGNMENT:
             if (command->assignment.expression != NULL && command->assignment.expression->type == AST_EXPR_INT) {
@@ -173,9 +214,42 @@ static bool generate_command(StringBuilder *builder, const ASTCommand *command) 
             return generate_expression(builder, command->write.expression) &&
                    builder_append(builder, "    call print_int\n") &&
                    builder_append(builder, "    call print_newline\n");
+        case AST_COMMAND_IF: {
+            size_t label_id = context->next_label_id++;
+
+            if (!generate_expression(builder, command->if_command.condition) ||
+                !builder_append(builder, "    cmp eax, 0\n")) {
+                return false;
+            }
+
+            if (command->if_command.has_else) {
+                return builder_appendf(builder, "    je .Lelse%zu\n", label_id) &&
+                       generate_command_block(context, command->if_command.then_commands, command->if_command.then_count) &&
+                       builder_appendf(builder, "    jmp .Lendif%zu\n", label_id) &&
+                       builder_appendf(builder, ".Lelse%zu:\n", label_id) &&
+                       generate_command_block(context, command->if_command.else_commands, command->if_command.else_count) &&
+                       builder_appendf(builder, ".Lendif%zu:\n", label_id);
+            }
+
+            return builder_appendf(builder, "    je .Lendif%zu\n", label_id) &&
+                   generate_command_block(context, command->if_command.then_commands, command->if_command.then_count) &&
+                   builder_appendf(builder, ".Lendif%zu:\n", label_id);
+        }
         default:
             return false;
     }
+}
+
+static bool generate_command_block(CodegenContext *context, const ASTCommand *commands, size_t command_count) {
+    size_t index;
+
+    for (index = 0; index < command_count; ++index) {
+        if (!generate_command(context, &commands[index])) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 static bool generate_helpers(StringBuilder *builder) {
@@ -224,6 +298,7 @@ static bool generate_helpers(StringBuilder *builder) {
 
 char *codegen_generate_program(const ASTProgram *program, const SymbolTable *symbols) {
     StringBuilder builder = {0};
+    CodegenContext context = {.builder = &builder, .next_label_id = 0};
     size_t index;
 
     if (program == NULL) {
@@ -249,11 +324,9 @@ char *codegen_generate_program(const ASTProgram *program, const SymbolTable *sym
         return NULL;
     }
 
-    for (index = 0; index < program->command_count; ++index) {
-        if (!generate_command(&builder, &program->commands[index])) {
-            free(builder.data);
-            return NULL;
-        }
+    if (!generate_command_block(&context, program->commands, program->command_count)) {
+        free(builder.data);
+        return NULL;
     }
 
     if (!builder_append(&builder, "    mov eax, 1\n    xor ebx, ebx\n    int 0x80\n") ||
