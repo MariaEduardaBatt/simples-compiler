@@ -168,6 +168,7 @@ void test_codegen_emits_loop_labels_for_enquanto(void) {
 
     assert_contains(assembly, ".Lwhile0:");
     assert_contains(assembly, "je .Lendwhile0");
+    assert_contains(assembly, ".Lendwhile0:");
     assert_contains(assembly, "jmp .Lwhile0");
 
     free(assembly);
