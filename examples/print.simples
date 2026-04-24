@@ -1,0 +1,7 @@
+programa demo
+inteiro x;
+inicio
+x <- (2 + 3) * (4 - 1);
+escreva x;
+escreval x;
+fim

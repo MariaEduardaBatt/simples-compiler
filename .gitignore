@@ -1,0 +1,33 @@
+# Diretório de build
+build/
+
+# Artefatos de compilação
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.exe
+
+# Saídas de assembler/linker
+*.asm.bak
+
+# Logs de execução e arquivos temporários
+*.log
+*.stderr
+*.stdout
+usage.err
+
+# Editores e SO
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Cobertura e profiling
+*.gcda
+*.gcno
+*.gcov
+coverage/

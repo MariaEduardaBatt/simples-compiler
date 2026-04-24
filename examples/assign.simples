@@ -1,0 +1,5 @@
+programa demo
+inteiro x;
+inicio
+x <- 10;
+fim
