@@ -64,7 +64,8 @@ typedef enum {
     AST_COMMAND_WRITE,
     AST_COMMAND_WRITELN,
     AST_COMMAND_IF,
-    AST_COMMAND_WHILE
+    AST_COMMAND_WHILE,
+    AST_COMMAND_FOR
 } ASTCommandType;
 
 typedef struct {
@@ -92,6 +93,17 @@ typedef struct {
     size_t body_count;
 } ASTWhileCommand;
 
+typedef struct {
+    char *iterator_name;
+    int line;
+    int column;
+    ASTExpression *start_expression;
+    ASTExpression *end_expression;
+    ASTExpression *step_expression;
+    ASTCommand *body_commands;
+    size_t body_count;
+} ASTForCommand;
+
 struct ASTCommand {
     ASTCommandType type;
     union {
@@ -99,6 +111,7 @@ struct ASTCommand {
         ASTWriteCommand write;
         ASTIfCommand if_command;
         ASTWhileCommand while_command;
+        ASTForCommand for_command;
     };
 };
 

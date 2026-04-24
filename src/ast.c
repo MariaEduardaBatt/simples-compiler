@@ -60,6 +60,13 @@ void ast_command_free(ASTCommand *command) {
             ast_expression_free(command->while_command.condition);
             ast_command_list_free(command->while_command.body_commands, command->while_command.body_count);
             break;
+        case AST_COMMAND_FOR:
+            free(command->for_command.iterator_name);
+            ast_expression_free(command->for_command.start_expression);
+            ast_expression_free(command->for_command.end_expression);
+            ast_expression_free(command->for_command.step_expression);
+            ast_command_list_free(command->for_command.body_commands, command->for_command.body_count);
+            break;
         default:
             break;
     }

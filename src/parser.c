@@ -617,6 +617,83 @@ static bool parse_command(Parser *parser, ASTCommand *command, CompilerError *er
         return true;
     }
 
+    if (parser_match(parser, TOK_PARA)) {
+        static const TokenType body_terminators[] = {TOK_FIMPARA};
+        const Token *iterator_token;
+
+        command->type = AST_COMMAND_FOR;
+
+        if (!parser_expect(parser, TOK_ID, error, "Esperado identificador apos 'para'.")) {
+            ast_command_free(command);
+            return false;
+        }
+
+        iterator_token = parser_previous(parser);
+        command->for_command.iterator_name = parser_strdup(iterator_token->lexeme);
+        if (command->for_command.iterator_name == NULL) {
+            ast_command_free(command);
+            return parser_oom(parser, error);
+        }
+        command->for_command.line = iterator_token->line;
+        command->for_command.column = iterator_token->column;
+
+        if (!parser_expect(parser, TOK_DE, error, "Esperado 'de'.")) {
+            ast_command_free(command);
+            return false;
+        }
+
+        command->for_command.start_expression = parse_expression(parser, error);
+        if (command->for_command.start_expression == NULL) {
+            ast_command_free(command);
+            return false;
+        }
+
+        if (!parser_expect(parser, TOK_ATE, error, "Esperado 'ate'.")) {
+            ast_command_free(command);
+            return false;
+        }
+
+        command->for_command.end_expression = parse_expression(parser, error);
+        if (command->for_command.end_expression == NULL) {
+            ast_command_free(command);
+            return false;
+        }
+
+        if (!parser_expect(parser, TOK_PASSO, error, "Esperado 'passo'.")) {
+            ast_command_free(command);
+            return false;
+        }
+
+        command->for_command.step_expression = parse_expression(parser, error);
+        if (command->for_command.step_expression == NULL) {
+            ast_command_free(command);
+            return false;
+        }
+
+        if (!parser_expect(parser, TOK_FACA, error, "Esperado 'faca'.")) {
+            ast_command_free(command);
+            return false;
+        }
+
+        if (!parse_command_list(
+                parser,
+                &command->for_command.body_commands,
+                &command->for_command.body_count,
+                body_terminators,
+                sizeof(body_terminators) / sizeof(body_terminators[0]),
+                error)) {
+            ast_command_free(command);
+            return false;
+        }
+
+        if (!parser_expect(parser, TOK_FIMPARA, error, "Esperado 'fimpara'.")) {
+            ast_command_free(command);
+            return false;
+        }
+
+        return true;
+    }
+
     return parser_fail_current(parser, error, "Esperado comando.");
 }
 

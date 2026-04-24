@@ -261,6 +261,36 @@ void test_semantic_rejects_undeclared_identifier_in_while_condition(void) {
     token_list_free(&tokens);
 }
 
+void test_semantic_rejects_undeclared_for_iterator(void) {
+    const char *source = "programa demo inteiro total; inicio para i de 1 ate 3 passo 1 faca total <- total + 1; fimpara fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SymbolTable symbols = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &symbols, &error));
+    TEST_ASSERT_EQUAL_STRING("Identificador 'i' nao declarado.", error.message);
+
+    symbol_table_free(&symbols);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_rejects_reserved_for_codegen_identifier(void) {
+    const char *source = "programa demo inteiro _for_end_0; inicio fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SymbolTable symbols = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &symbols, &error));
+    TEST_ASSERT_EQUAL_STRING("Identificador '_for_end_0' reservado para uso interno.", error.message);
+
+    symbol_table_free(&symbols);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_semantic_rejects_duplicate_declarations);
@@ -274,5 +304,7 @@ int main(void) {
     RUN_TEST(test_semantic_uses_else_count_as_source_of_truth_for_if_else);
     RUN_TEST(test_semantic_rejects_undeclared_identifier_inside_while_body);
     RUN_TEST(test_semantic_rejects_undeclared_identifier_in_while_condition);
+    RUN_TEST(test_semantic_rejects_undeclared_for_iterator);
+    RUN_TEST(test_semantic_rejects_reserved_for_codegen_identifier);
     return UNITY_END();
 }

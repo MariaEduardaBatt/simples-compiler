@@ -4,6 +4,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+static bool semantic_identifier_is_reserved(const char *name) {
+    return name != NULL &&
+           (strncmp(name, "_for_end_", strlen("_for_end_")) == 0 ||
+            strncmp(name, "_for_step_", strlen("_for_step_")) == 0);
+}
+
 static char *semantic_strdup(const char *text) {
     size_t length;
     char *copy;
@@ -146,6 +152,17 @@ static bool analyze_command(const ASTCommand *command, const SymbolTable *symbol
         case AST_COMMAND_WHILE:
             return analyze_expression(command->while_command.condition, symbols, error) &&
                    analyze_command_list(command->while_command.body_commands, command->while_command.body_count, symbols, error);
+        case AST_COMMAND_FOR:
+            return semantic_check_identifier(
+                       symbols,
+                       command->for_command.iterator_name,
+                       command->for_command.line,
+                       command->for_command.column,
+                       error) &&
+                   analyze_expression(command->for_command.start_expression, symbols, error) &&
+                   analyze_expression(command->for_command.end_expression, symbols, error) &&
+                   analyze_expression(command->for_command.step_expression, symbols, error) &&
+                   analyze_command_list(command->for_command.body_commands, command->for_command.body_count, symbols, error);
         default:
             return semantic_fail(error, "Comando invalido.");
     }
@@ -182,6 +199,12 @@ bool analyze_program(const ASTProgram *program, SymbolTable *out_symbols, Compil
     for (index = 0; index < program->declaration_count; ++index) {
         char message[256];
         const char *name = program->declarations[index].name;
+
+        if (semantic_identifier_is_reserved(name)) {
+            snprintf(message, sizeof(message), "Identificador '%s' reservado para uso interno.", name);
+            symbol_table_free(&symbols);
+            return semantic_fail_declaration(&program->declarations[index], error, message);
+        }
 
         if (symbol_table_contains(&symbols, name)) {
             snprintf(message, sizeof(message), "Identificador '%s' ja declarado.", name);

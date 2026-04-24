@@ -302,6 +302,20 @@ void test_parser_parses_while_loop_body(void) {
     token_list_free(&tokens);
 }
 
+void test_parser_parses_for_loop_header_and_body(void) {
+    const char *source =
+        "programa demo inteiro i, total; inicio para i de 1 ate 3 passo 1 faca total <- total + i; fimpara fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+
+    TEST_ASSERT_EQUAL(AST_COMMAND_FOR, program->commands[0].type);
+    TEST_ASSERT_EQUAL_STRING("i", program->commands[0].for_command.iterator_name);
+    TEST_ASSERT_EQUAL_size_t(1, program->commands[0].for_command.body_count);
+
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_parser_builds_assignment_ast_with_expected_counts_and_shape);
@@ -320,5 +334,6 @@ int main(void) {
     RUN_TEST(test_parser_builds_left_associative_logical_expression_chain);
     RUN_TEST(test_parser_parses_if_with_else_blocks);
     RUN_TEST(test_parser_parses_while_loop_body);
+    RUN_TEST(test_parser_parses_for_loop_header_and_body);
     return UNITY_END();
 }

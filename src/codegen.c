@@ -17,6 +17,12 @@ typedef struct {
     size_t next_label_id;
 } CodegenContext;
 
+typedef struct {
+    size_t *items;
+    size_t count;
+    size_t capacity;
+} SizeList;
+
 static bool builder_reserve(StringBuilder *builder, size_t extra_length) {
     size_t required_length;
     size_t new_capacity;
@@ -80,6 +86,25 @@ static bool builder_appendf(StringBuilder *builder, const char *format, ...) {
     return true;
 }
 
+static bool size_list_append(SizeList *list, size_t value) {
+    size_t *items;
+    size_t new_capacity;
+
+    if (list->count == list->capacity) {
+        new_capacity = list->capacity == 0 ? 4 : list->capacity * 2;
+        items = realloc(list->items, new_capacity * sizeof(*items));
+        if (items == NULL) {
+            return false;
+        }
+
+        list->items = items;
+        list->capacity = new_capacity;
+    }
+
+    list->items[list->count++] = value;
+    return true;
+}
+
 static const char *symbol_name_at(const ASTProgram *program, const SymbolTable *symbols, size_t index) {
     if (symbols != NULL && symbols->names != NULL && index < symbols->count) {
         const char *name = symbols->names[index];
@@ -122,6 +147,48 @@ static bool builder_append_booleanize(StringBuilder *builder, const char *regist
         byte_register_name,
         register_name,
         byte_register_name);
+}
+
+static bool collect_for_loop_ids_in_block(SizeList *for_loop_ids, size_t *next_label_id, const ASTCommand *commands, size_t command_count);
+
+static bool collect_for_loop_ids_in_command(SizeList *for_loop_ids, size_t *next_label_id, const ASTCommand *command) {
+    size_t label_id;
+
+    switch (command->type) {
+        case AST_COMMAND_IF:
+            (*next_label_id)++;
+            return collect_for_loop_ids_in_block(
+                       for_loop_ids, next_label_id, command->if_command.then_commands, command->if_command.then_count) &&
+                   collect_for_loop_ids_in_block(
+                       for_loop_ids, next_label_id, command->if_command.else_commands, command->if_command.else_count);
+        case AST_COMMAND_WHILE:
+            (*next_label_id)++;
+            return collect_for_loop_ids_in_block(
+                for_loop_ids, next_label_id, command->while_command.body_commands, command->while_command.body_count);
+        case AST_COMMAND_FOR:
+            label_id = (*next_label_id)++;
+            return size_list_append(for_loop_ids, label_id) &&
+                   collect_for_loop_ids_in_block(
+                       for_loop_ids, next_label_id, command->for_command.body_commands, command->for_command.body_count);
+        case AST_COMMAND_ASSIGNMENT:
+        case AST_COMMAND_WRITE:
+        case AST_COMMAND_WRITELN:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool collect_for_loop_ids_in_block(SizeList *for_loop_ids, size_t *next_label_id, const ASTCommand *commands, size_t command_count) {
+    size_t index;
+
+    for (index = 0; index < command_count; ++index) {
+        if (!collect_for_loop_ids_in_command(for_loop_ids, next_label_id, &commands[index])) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 static bool generate_expression(StringBuilder *builder, const ASTExpression *expression) {
@@ -242,9 +309,42 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command)
                    generate_expression(builder, command->while_command.condition) &&
                    builder_append(builder, "    cmp eax, 0\n") &&
                    builder_appendf(builder, "    je .Lendwhile%zu\n", label_id) &&
-                   generate_command_block(context, command->while_command.body_commands, command->while_command.body_count) &&
-                   builder_appendf(builder, "    jmp .Lwhile%zu\n", label_id) &&
-                   builder_appendf(builder, ".Lendwhile%zu:\n", label_id);
+                    generate_command_block(context, command->while_command.body_commands, command->while_command.body_count) &&
+                    builder_appendf(builder, "    jmp .Lwhile%zu\n", label_id) &&
+                    builder_appendf(builder, ".Lendwhile%zu:\n", label_id);
+        }
+        case AST_COMMAND_FOR: {
+            size_t label_id = context->next_label_id++;
+
+            return generate_expression(builder, command->for_command.start_expression) &&
+                   builder_appendf(builder, "    mov dword [%s], eax\n", command->for_command.iterator_name) &&
+                   generate_expression(builder, command->for_command.end_expression) &&
+                   builder_appendf(builder, "    mov dword [_for_end_%zu], eax\n", label_id) &&
+                   generate_expression(builder, command->for_command.step_expression) &&
+                   builder_appendf(builder, "    mov dword [_for_step_%zu], eax\n", label_id) &&
+                   builder_appendf(builder, ".Lfor%zu:\n", label_id) &&
+                   builder_appendf(builder, "    mov eax, dword [_for_step_%zu]\n", label_id) &&
+                   builder_append(builder, "    cmp eax, 0\n") &&
+                   builder_appendf(builder, "    je .Lendfor%zu\n", label_id) &&
+                   builder_appendf(builder, "    jg .Lforpos%zu\n", label_id) &&
+                   builder_appendf(builder, "    mov eax, dword [%s]\n", command->for_command.iterator_name) &&
+                   builder_appendf(builder, "    mov ebx, dword [_for_end_%zu]\n", label_id) &&
+                   builder_append(builder, "    cmp eax, ebx\n") &&
+                   builder_appendf(builder, "    jl .Lendfor%zu\n", label_id) &&
+                   builder_appendf(builder, "    jmp .Lforbody%zu\n", label_id) &&
+                   builder_appendf(builder, ".Lforpos%zu:\n", label_id) &&
+                   builder_appendf(builder, "    mov eax, dword [%s]\n", command->for_command.iterator_name) &&
+                   builder_appendf(builder, "    mov ebx, dword [_for_end_%zu]\n", label_id) &&
+                   builder_append(builder, "    cmp eax, ebx\n") &&
+                   builder_appendf(builder, "    jg .Lendfor%zu\n", label_id) &&
+                   builder_appendf(builder, ".Lforbody%zu:\n", label_id) &&
+                   generate_command_block(context, command->for_command.body_commands, command->for_command.body_count) &&
+                   builder_appendf(builder, "    mov eax, dword [%s]\n", command->for_command.iterator_name) &&
+                   builder_appendf(builder, "    mov ebx, dword [_for_step_%zu]\n", label_id) &&
+                   builder_append(builder, "    add eax, ebx\n") &&
+                   builder_appendf(builder, "    mov dword [%s], eax\n", command->for_command.iterator_name) &&
+                   builder_appendf(builder, "    jmp .Lfor%zu\n", label_id) &&
+                   builder_appendf(builder, ".Lendfor%zu:\n", label_id);
         }
         default:
             return false;
@@ -310,13 +410,21 @@ static bool generate_helpers(StringBuilder *builder) {
 char *codegen_generate_program(const ASTProgram *program, const SymbolTable *symbols) {
     StringBuilder builder = {0};
     CodegenContext context = {.builder = &builder, .next_label_id = 0};
+    SizeList for_loop_ids = {0};
     size_t index;
+    size_t next_label_id = 0;
 
     if (program == NULL) {
         return NULL;
     }
 
+    if (!collect_for_loop_ids_in_block(&for_loop_ids, &next_label_id, program->commands, program->command_count)) {
+        free(for_loop_ids.items);
+        return NULL;
+    }
+
     if (!builder_append(&builder, "global _start\n\nsection .data\n")) {
+        free(for_loop_ids.items);
         free(builder.data);
         return NULL;
     }
@@ -325,26 +433,42 @@ char *codegen_generate_program(const ASTProgram *program, const SymbolTable *sym
         const char *name = symbol_name_at(program, symbols, index);
 
         if (name == NULL || !builder_appendf(&builder, "%s dd 0\n", name)) {
+            free(for_loop_ids.items);
+            free(builder.data);
+            return NULL;
+        }
+    }
+
+    for (index = 0; index < for_loop_ids.count; ++index) {
+        size_t label_id = for_loop_ids.items[index];
+
+        if (!builder_appendf(&builder, "_for_end_%zu dd 0\n", label_id) ||
+            !builder_appendf(&builder, "_for_step_%zu dd 0\n", label_id)) {
+            free(for_loop_ids.items);
             free(builder.data);
             return NULL;
         }
     }
 
     if (!builder_append(&builder, "newline db 10\nprint_buffer times 12 db 0\n\nsection .text\n_start:\n")) {
+        free(for_loop_ids.items);
         free(builder.data);
         return NULL;
     }
 
     if (!generate_command_block(&context, program->commands, program->command_count)) {
+        free(for_loop_ids.items);
         free(builder.data);
         return NULL;
     }
 
     if (!builder_append(&builder, "    mov eax, 1\n    xor ebx, ebx\n    int 0x80\n") ||
         !generate_helpers(&builder)) {
+        free(for_loop_ids.items);
         free(builder.data);
         return NULL;
     }
 
+    free(for_loop_ids.items);
     return builder.data;
 }

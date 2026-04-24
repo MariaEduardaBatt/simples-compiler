@@ -174,6 +174,18 @@ void test_codegen_emits_loop_labels_for_enquanto(void) {
     free(assembly);
 }
 
+void test_codegen_materializes_for_bounds_and_step_once(void) {
+    char *assembly =
+        generate_source("programa demo inteiro i, total; inicio para i de 1 ate 3 passo 1 faca total <- total + i; fimpara fim");
+
+    assert_contains(assembly, "_for_end_0 dd 0");
+    assert_contains(assembly, "_for_step_0 dd 0");
+    assert_contains(assembly, ".Lfor0:");
+    assert_contains(assembly, ".Lendfor0:");
+
+    free(assembly);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_codegen_emits_direct_store_for_integer_assignment);
@@ -188,5 +200,6 @@ int main(void) {
     RUN_TEST(test_codegen_emits_labels_and_jump_for_if_else);
     RUN_TEST(test_codegen_emits_label_and_jump_for_if_without_else);
     RUN_TEST(test_codegen_emits_loop_labels_for_enquanto);
+    RUN_TEST(test_codegen_materializes_for_bounds_and_step_once);
     return UNITY_END();
 }
