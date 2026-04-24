@@ -235,6 +235,17 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command)
                    generate_command_block(context, command->if_command.then_commands, command->if_command.then_count) &&
                    builder_appendf(builder, ".Lendif%zu:\n", label_id);
         }
+        case AST_COMMAND_WHILE: {
+            size_t label_id = context->next_label_id++;
+
+            return builder_appendf(builder, ".Lwhile%zu:\n", label_id) &&
+                   generate_expression(builder, command->while_command.condition) &&
+                   builder_append(builder, "    cmp eax, 0\n") &&
+                   builder_appendf(builder, "    je .Lendwhile%zu\n", label_id) &&
+                   generate_command_block(context, command->while_command.body_commands, command->while_command.body_count) &&
+                   builder_appendf(builder, "    jmp .Lwhile%zu\n", label_id) &&
+                   builder_appendf(builder, ".Lendwhile%zu:\n", label_id);
+        }
         default:
             return false;
     }

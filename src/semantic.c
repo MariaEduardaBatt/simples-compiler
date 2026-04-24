@@ -143,6 +143,9 @@ static bool analyze_command(const ASTCommand *command, const SymbolTable *symbol
                    analyze_command_list(command->if_command.then_commands, command->if_command.then_count, symbols, error) &&
                    (command->if_command.else_count == 0 ||
                     analyze_command_list(command->if_command.else_commands, command->if_command.else_count, symbols, error));
+        case AST_COMMAND_WHILE:
+            return analyze_expression(command->while_command.condition, symbols, error) &&
+                   analyze_command_list(command->while_command.body_commands, command->while_command.body_count, symbols, error);
         default:
             return semantic_fail(error, "Comando invalido.");
     }

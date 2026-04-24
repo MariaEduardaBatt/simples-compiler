@@ -217,6 +217,28 @@ void test_semantic_uses_else_count_as_source_of_truth_for_if_else(void) {
     symbol_table_free(&symbols);
 }
 
+void test_semantic_rejects_undeclared_identifier_inside_while_body(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro x;\n"
+        "inicio\n"
+        "  enquanto x < 3 faca\n"
+        "    y <- x + 1;\n"
+        "  fimenquanto\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SymbolTable symbols = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &symbols, &error));
+    TEST_ASSERT_EQUAL_STRING("Identificador 'y' nao declarado.", error.message);
+
+    symbol_table_free(&symbols);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_semantic_rejects_duplicate_declarations);
@@ -228,5 +250,6 @@ int main(void) {
     RUN_TEST(test_semantic_accepts_declared_variables_and_collects_symbols);
     RUN_TEST(test_semantic_rejects_undeclared_identifier_inside_if_condition);
     RUN_TEST(test_semantic_uses_else_count_as_source_of_truth_for_if_else);
+    RUN_TEST(test_semantic_rejects_undeclared_identifier_inside_while_body);
     return UNITY_END();
 }

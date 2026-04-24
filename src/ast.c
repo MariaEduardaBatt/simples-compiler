@@ -2,6 +2,16 @@
 
 #include <stdlib.h>
 
+static void ast_command_list_free(ASTCommand *commands, size_t command_count) {
+    size_t index;
+
+    for (index = 0; index < command_count; ++index) {
+        ast_command_free(&commands[index]);
+    }
+
+    free(commands);
+}
+
 void ast_expression_free(ASTExpression *expression) {
     if (expression == NULL) {
         return;
@@ -41,19 +51,15 @@ void ast_command_free(ASTCommand *command) {
             ast_expression_free(command->write.expression);
             break;
         case AST_COMMAND_IF: {
-            size_t index;
-
             ast_expression_free(command->if_command.condition);
-            for (index = 0; index < command->if_command.then_count; ++index) {
-                ast_command_free(&command->if_command.then_commands[index]);
-            }
-            free(command->if_command.then_commands);
-            for (index = 0; index < command->if_command.else_count; ++index) {
-                ast_command_free(&command->if_command.else_commands[index]);
-            }
-            free(command->if_command.else_commands);
+            ast_command_list_free(command->if_command.then_commands, command->if_command.then_count);
+            ast_command_list_free(command->if_command.else_commands, command->if_command.else_count);
             break;
         }
+        case AST_COMMAND_WHILE:
+            ast_expression_free(command->while_command.condition);
+            ast_command_list_free(command->while_command.body_commands, command->while_command.body_count);
+            break;
         default:
             break;
     }
@@ -73,10 +79,7 @@ void ast_program_free(ASTProgram *program) {
     }
     free(program->declarations);
 
-    for (index = 0; index < program->command_count; ++index) {
-        ast_command_free(&program->commands[index]);
-    }
-    free(program->commands);
+    ast_command_list_free(program->commands, program->command_count);
 
     free(program);
 }

@@ -289,6 +289,19 @@ void test_parser_parses_if_with_else_blocks(void) {
     token_list_free(&tokens);
 }
 
+void test_parser_parses_while_loop_body(void) {
+    const char *source =
+        "programa demo inteiro x; inicio enquanto x < 3 faca x <- x + 1; fimenquanto fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+
+    TEST_ASSERT_EQUAL(AST_COMMAND_WHILE, program->commands[0].type);
+    TEST_ASSERT_EQUAL_size_t(1, program->commands[0].while_command.body_count);
+
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_parser_builds_assignment_ast_with_expected_counts_and_shape);
@@ -306,5 +319,6 @@ int main(void) {
     RUN_TEST(test_parser_applies_not_before_relational_operator_without_parentheses);
     RUN_TEST(test_parser_builds_left_associative_logical_expression_chain);
     RUN_TEST(test_parser_parses_if_with_else_blocks);
+    RUN_TEST(test_parser_parses_while_loop_body);
     return UNITY_END();
 }

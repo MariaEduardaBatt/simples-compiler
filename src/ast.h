@@ -63,7 +63,8 @@ typedef enum {
     AST_COMMAND_ASSIGNMENT,
     AST_COMMAND_WRITE,
     AST_COMMAND_WRITELN,
-    AST_COMMAND_IF
+    AST_COMMAND_IF,
+    AST_COMMAND_WHILE
 } ASTCommandType;
 
 typedef struct {
@@ -85,12 +86,19 @@ typedef struct {
     size_t else_count;
 } ASTIfCommand;
 
+typedef struct {
+    ASTExpression *condition;
+    ASTCommand *body_commands;
+    size_t body_count;
+} ASTWhileCommand;
+
 struct ASTCommand {
     ASTCommandType type;
     union {
         ASTAssignmentCommand assignment;
         ASTWriteCommand write;
         ASTIfCommand if_command;
+        ASTWhileCommand while_command;
     };
 };
 

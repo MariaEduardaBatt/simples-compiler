@@ -162,6 +162,17 @@ void test_codegen_emits_label_and_jump_for_if_without_else(void) {
     free(assembly);
 }
 
+void test_codegen_emits_loop_labels_for_enquanto(void) {
+    char *assembly =
+        generate_source("programa demo inteiro x; inicio enquanto x < 3 faca x <- x + 1; fimenquanto fim");
+
+    assert_contains(assembly, ".Lwhile0:");
+    assert_contains(assembly, "je .Lendwhile0");
+    assert_contains(assembly, "jmp .Lwhile0");
+
+    free(assembly);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_codegen_emits_direct_store_for_integer_assignment);
@@ -175,5 +186,6 @@ int main(void) {
     RUN_TEST(test_codegen_returns_null_when_symbol_fallback_has_no_declarations);
     RUN_TEST(test_codegen_emits_labels_and_jump_for_if_else);
     RUN_TEST(test_codegen_emits_label_and_jump_for_if_without_else);
+    RUN_TEST(test_codegen_emits_loop_labels_for_enquanto);
     return UNITY_END();
 }

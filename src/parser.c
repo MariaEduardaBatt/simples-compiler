@@ -583,6 +583,40 @@ static bool parse_command(Parser *parser, ASTCommand *command, CompilerError *er
         return true;
     }
 
+    if (parser_match(parser, TOK_ENQUANTO)) {
+        static const TokenType body_terminators[] = {TOK_FIMENQUANTO};
+
+        command->type = AST_COMMAND_WHILE;
+        command->while_command.condition = parse_expression(parser, error);
+        if (command->while_command.condition == NULL) {
+            ast_command_free(command);
+            return false;
+        }
+
+        if (!parser_expect(parser, TOK_FACA, error, "Esperado 'faca'.")) {
+            ast_command_free(command);
+            return false;
+        }
+
+        if (!parse_command_list(
+                parser,
+                &command->while_command.body_commands,
+                &command->while_command.body_count,
+                body_terminators,
+                sizeof(body_terminators) / sizeof(body_terminators[0]),
+                error)) {
+            ast_command_free(command);
+            return false;
+        }
+
+        if (!parser_expect(parser, TOK_FIMENQUANTO, error, "Esperado 'fimenquanto'.")) {
+            ast_command_free(command);
+            return false;
+        }
+
+        return true;
+    }
+
     return parser_fail_current(parser, error, "Esperado comando.");
 }
 
