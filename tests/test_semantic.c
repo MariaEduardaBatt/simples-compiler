@@ -276,15 +276,24 @@ void test_semantic_rejects_undeclared_for_iterator(void) {
     token_list_free(&tokens);
 }
 
-void test_semantic_rejects_reserved_for_codegen_identifier(void) {
-    const char *source = "programa demo inteiro _for_end_0; inicio fim";
+void test_semantic_accepts_for_codegen_like_identifier_names(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro _for_end_0,\n"
+        "        _for_step_0;\n"
+        "inicio\n"
+        "  _for_end_0 <- 1;\n"
+        "  escreva _for_step_0;\n"
+        "fim";
     TokenList tokens;
     ASTProgram *program = parse_source(source, &tokens);
     SymbolTable symbols = {0};
     CompilerError error = {0};
 
-    TEST_ASSERT_FALSE(analyze_program(program, &symbols, &error));
-    TEST_ASSERT_EQUAL_STRING("Identificador '_for_end_0' reservado para uso interno.", error.message);
+    TEST_ASSERT_TRUE(analyze_program(program, &symbols, &error));
+    TEST_ASSERT_EQUAL_size_t(2, symbols.count);
+    TEST_ASSERT_EQUAL_STRING("_for_end_0", symbols.names[0]);
+    TEST_ASSERT_EQUAL_STRING("_for_step_0", symbols.names[1]);
 
     symbol_table_free(&symbols);
     ast_program_free(program);
@@ -305,6 +314,6 @@ int main(void) {
     RUN_TEST(test_semantic_rejects_undeclared_identifier_inside_while_body);
     RUN_TEST(test_semantic_rejects_undeclared_identifier_in_while_condition);
     RUN_TEST(test_semantic_rejects_undeclared_for_iterator);
-    RUN_TEST(test_semantic_rejects_reserved_for_codegen_identifier);
+    RUN_TEST(test_semantic_accepts_for_codegen_like_identifier_names);
     return UNITY_END();
 }

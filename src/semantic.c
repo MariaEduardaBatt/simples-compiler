@@ -4,12 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-static bool semantic_identifier_is_reserved(const char *name) {
-    return name != NULL &&
-           (strncmp(name, "_for_end_", strlen("_for_end_")) == 0 ||
-            strncmp(name, "_for_step_", strlen("_for_step_")) == 0);
-}
-
 static char *semantic_strdup(const char *text) {
     size_t length;
     char *copy;
@@ -199,12 +193,6 @@ bool analyze_program(const ASTProgram *program, SymbolTable *out_symbols, Compil
     for (index = 0; index < program->declaration_count; ++index) {
         char message[256];
         const char *name = program->declarations[index].name;
-
-        if (semantic_identifier_is_reserved(name)) {
-            snprintf(message, sizeof(message), "Identificador '%s' reservado para uso interno.", name);
-            symbol_table_free(&symbols);
-            return semantic_fail_declaration(&program->declarations[index], error, message);
-        }
 
         if (symbol_table_contains(&symbols, name)) {
             snprintf(message, sizeof(message), "Identificador '%s' ja declarado.", name);

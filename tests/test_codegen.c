@@ -186,6 +186,23 @@ void test_codegen_materializes_for_bounds_and_step_once(void) {
     free(assembly);
 }
 
+void test_codegen_escapes_user_identifiers_that_collide_with_for_temporaries(void) {
+    char *assembly =
+        generate_source("programa demo inteiro i, _for_end_0, _for_step_0; inicio _for_end_0 <- 3; _for_step_0 <- 1; para i de 1 ate _for_end_0 passo _for_step_0 faca escreva _for_end_0; fimpara fim");
+
+    assert_contains(assembly, "$_for_end_0 dd 0");
+    assert_contains(assembly, "$_for_step_0 dd 0");
+    assert_contains(assembly, "_for_end_0 dd 0");
+    assert_contains(assembly, "_for_step_0 dd 0");
+    assert_contains(assembly, "mov dword [$_for_end_0], 3");
+    assert_contains(assembly, "mov dword [$_for_step_0], 1");
+    assert_contains(assembly, "mov eax, dword [$_for_end_0]\n    mov dword [_for_end_0], eax");
+    assert_contains(assembly, "mov eax, dword [$_for_step_0]\n    mov dword [_for_step_0], eax");
+    assert_contains(assembly, "mov eax, dword [$_for_end_0]\n    call print_int");
+
+    free(assembly);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_codegen_emits_direct_store_for_integer_assignment);
@@ -201,5 +218,6 @@ int main(void) {
     RUN_TEST(test_codegen_emits_label_and_jump_for_if_without_else);
     RUN_TEST(test_codegen_emits_loop_labels_for_enquanto);
     RUN_TEST(test_codegen_materializes_for_bounds_and_step_once);
+    RUN_TEST(test_codegen_escapes_user_identifiers_that_collide_with_for_temporaries);
     return UNITY_END();
 }
