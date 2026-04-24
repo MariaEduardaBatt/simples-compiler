@@ -117,6 +117,19 @@ static bool generate_expression(StringBuilder *builder, const ASTExpression *exp
             return builder_appendf(builder, "    mov eax, %d\n", expression->int_value);
         case AST_EXPR_IDENTIFIER:
             return builder_appendf(builder, "    mov eax, dword [%s]\n", expression->identifier);
+        case AST_EXPR_UNARY:
+            if (!generate_expression(builder, expression->unary.operand)) {
+                return false;
+            }
+
+            switch (expression->unary.op) {
+                case AST_UNARY_NEGATE:
+                    return builder_append(builder, "    neg eax\n");
+                case AST_UNARY_NOT:
+                    return builder_append(builder, "    cmp eax, 0\n    sete al\n    movzx eax, al\n");
+                default:
+                    return false;
+            }
         case AST_EXPR_BINARY:
             if (!generate_expression(builder, expression->binary.left) ||
                 !builder_append(builder, "    push eax\n") ||

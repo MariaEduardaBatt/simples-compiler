@@ -118,6 +118,52 @@ void test_semantic_rejects_undeclared_identifier_in_assignment_expression(void) 
     token_list_free(&tokens);
 }
 
+void test_semantic_accepts_unary_integer_and_identifier_expressions(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro x;\n"
+        "inicio\n"
+        "  x <- -1;\n"
+        "  escreva nao x;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SymbolTable symbols = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &symbols, &error));
+    TEST_ASSERT_EQUAL_size_t(1, symbols.count);
+    TEST_ASSERT_EQUAL_STRING("x", symbols.names[0]);
+
+    symbol_table_free(&symbols);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_rejects_undeclared_identifier_inside_unary_expression(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro x;\n"
+        "inicio\n"
+        "  x <- -y;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SymbolTable symbols = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &symbols, &error));
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_SEMANTIC, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Identificador 'y' nao declarado.", error.message);
+    TEST_ASSERT_EQUAL_INT(4, error.line);
+    TEST_ASSERT_EQUAL_INT(9, error.column);
+    TEST_ASSERT_EQUAL_size_t(0, symbols.count);
+
+    symbol_table_free(&symbols);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
 void test_semantic_accepts_declared_variables_and_collects_symbols(void) {
     const char *source = "programa demo inteiro x, y; inicio x <- 1; escreva x + y; fim";
     TokenList tokens;
@@ -141,6 +187,8 @@ int main(void) {
     RUN_TEST(test_semantic_rejects_undeclared_variable_in_write_expression);
     RUN_TEST(test_semantic_rejects_undeclared_assignment_target);
     RUN_TEST(test_semantic_rejects_undeclared_identifier_in_assignment_expression);
+    RUN_TEST(test_semantic_accepts_unary_integer_and_identifier_expressions);
+    RUN_TEST(test_semantic_rejects_undeclared_identifier_inside_unary_expression);
     RUN_TEST(test_semantic_accepts_declared_variables_and_collects_symbols);
     return UNITY_END();
 }

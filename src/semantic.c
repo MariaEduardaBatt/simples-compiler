@@ -116,6 +116,8 @@ static bool analyze_expression(const ASTExpression *expression, const SymbolTabl
             return true;
         case AST_EXPR_IDENTIFIER:
             return semantic_check_identifier(symbols, expression->identifier, expression->line, expression->column, error);
+        case AST_EXPR_UNARY:
+            return analyze_expression(expression->unary.operand, symbols, error);
         case AST_EXPR_BINARY:
             return analyze_expression(expression->binary.left, symbols, error) &&
                    analyze_expression(expression->binary.right, symbols, error);

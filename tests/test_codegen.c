@@ -109,6 +109,17 @@ void test_codegen_emits_add_sub_and_mul_instructions(void) {
     free(assembly);
 }
 
+void test_codegen_emits_unary_negation_and_logical_not_sequences(void) {
+    char *assembly = generate_source("programa demo inteiro x, y; inicio x <- -1; y <- nao x; fim");
+
+    assert_contains(assembly, "mov eax, 1\n    neg eax\n    mov dword [x], eax");
+    assert_contains(
+        assembly,
+        "mov eax, dword [x]\n    cmp eax, 0\n    sete al\n    movzx eax, al\n    mov dword [y], eax");
+
+    free(assembly);
+}
+
 void test_codegen_uses_program_declarations_when_symbol_names_are_missing(void) {
     char name[] = "x";
     ASTDeclaration declaration = {.name = name, .line = 1, .column = 1};
@@ -137,6 +148,7 @@ int main(void) {
     RUN_TEST(test_codegen_emits_program_sections_and_helper_bodies_in_stable_order);
     RUN_TEST(test_codegen_emits_identifier_loads_and_plain_escreva_without_newline);
     RUN_TEST(test_codegen_emits_add_sub_and_mul_instructions);
+    RUN_TEST(test_codegen_emits_unary_negation_and_logical_not_sequences);
     RUN_TEST(test_codegen_uses_program_declarations_when_symbol_names_are_missing);
     RUN_TEST(test_codegen_returns_null_when_symbol_fallback_has_no_declarations);
     return UNITY_END();

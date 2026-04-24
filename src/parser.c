@@ -338,8 +338,9 @@ static ASTBinaryOp parser_relational_op(TokenType type) {
         case TOK_MAIOR_IGUAL:
             return AST_BINARY_GE;
         case TOK_MENOR_IGUAL:
-        default:
             return AST_BINARY_LE;
+        default:
+            abort();
     }
 }
 
