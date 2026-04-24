@@ -6,14 +6,28 @@
 typedef enum {
     AST_EXPR_INT,
     AST_EXPR_IDENTIFIER,
+    AST_EXPR_UNARY,
     AST_EXPR_BINARY
 } ASTExpressionType;
+
+typedef enum {
+    AST_UNARY_NEGATE,
+    AST_UNARY_NOT
+} ASTUnaryOp;
 
 typedef enum {
     AST_BINARY_ADD,
     AST_BINARY_SUB,
     AST_BINARY_MUL,
-    AST_BINARY_DIV
+    AST_BINARY_DIV,
+    AST_BINARY_GT,
+    AST_BINARY_LT,
+    AST_BINARY_EQ,
+    AST_BINARY_NE,
+    AST_BINARY_GE,
+    AST_BINARY_LE,
+    AST_BINARY_AND,
+    AST_BINARY_OR
 } ASTBinaryOp;
 
 typedef struct ASTExpression ASTExpression;
@@ -25,6 +39,10 @@ struct ASTExpression {
     union {
         int int_value;
         char *identifier;
+        struct {
+            ASTUnaryOp op;
+            ASTExpression *operand;
+        } unary;
         struct {
             ASTBinaryOp op;
             ASTExpression *left;

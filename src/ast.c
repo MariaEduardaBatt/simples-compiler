@@ -11,6 +11,9 @@ void ast_expression_free(ASTExpression *expression) {
         case AST_EXPR_IDENTIFIER:
             free(expression->identifier);
             break;
+        case AST_EXPR_UNARY:
+            ast_expression_free(expression->unary.operand);
+            break;
         case AST_EXPR_BINARY:
             ast_expression_free(expression->binary.left);
             ast_expression_free(expression->binary.right);

@@ -183,6 +183,90 @@ void test_parser_builds_left_associative_division(void) {
     token_list_free(&tokens);
 }
 
+void test_parser_builds_relational_and_logical_expression_tree(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro x;\n"
+        "inicio\n"
+        "  x <- nao (1 < 2) ou 3 = 4;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    ASTExpression *expression = program->commands[0].assignment.expression;
+
+    TEST_ASSERT_EQUAL(AST_EXPR_BINARY, expression->type);
+    TEST_ASSERT_EQUAL(AST_BINARY_OR, expression->binary.op);
+    TEST_ASSERT_EQUAL(AST_EXPR_UNARY, expression->binary.left->type);
+    TEST_ASSERT_EQUAL(AST_UNARY_NOT, expression->binary.left->unary.op);
+
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_parser_preserves_relational_precedence_below_addition(void) {
+    const char *source = "programa demo inteiro x; inicio x <- 1 + 2 > 3; fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    ASTExpression *expression = program->commands[0].assignment.expression;
+
+    TEST_ASSERT_EQUAL(AST_BINARY_GT, expression->binary.op);
+    TEST_ASSERT_EQUAL(AST_BINARY_ADD, expression->binary.left->binary.op);
+
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_parser_builds_unary_negation_before_multiplication(void) {
+    const char *source = "programa demo inteiro x; inicio x <- -1 * 2; fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    ASTExpression *expression = program->commands[0].assignment.expression;
+
+    TEST_ASSERT_EQUAL(AST_EXPR_BINARY, expression->type);
+    TEST_ASSERT_EQUAL(AST_BINARY_MUL, expression->binary.op);
+    TEST_ASSERT_EQUAL(AST_EXPR_UNARY, expression->binary.left->type);
+    TEST_ASSERT_EQUAL(AST_UNARY_NEGATE, expression->binary.left->unary.op);
+
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_parser_applies_not_before_relational_operator_without_parentheses(void) {
+    const char *source = "programa demo inteiro x; inicio x <- nao x > 5; fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    ASTExpression *expression = program->commands[0].assignment.expression;
+
+    TEST_ASSERT_EQUAL(AST_EXPR_BINARY, expression->type);
+    TEST_ASSERT_EQUAL(AST_BINARY_GT, expression->binary.op);
+    TEST_ASSERT_EQUAL(AST_EXPR_UNARY, expression->binary.left->type);
+    TEST_ASSERT_EQUAL(AST_UNARY_NOT, expression->binary.left->unary.op);
+
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_parser_builds_left_associative_logical_expression_chain(void) {
+    const char *source = "programa demo inteiro x; inicio x <- 1 = 1 ou 2 = 2 e 3 = 3; fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    ASTExpression *expression = program->commands[0].assignment.expression;
+
+    TEST_ASSERT_EQUAL(AST_EXPR_BINARY, expression->type);
+    TEST_ASSERT_EQUAL(AST_BINARY_AND, expression->binary.op);
+    TEST_ASSERT_EQUAL(AST_EXPR_BINARY, expression->binary.left->type);
+    TEST_ASSERT_EQUAL(AST_BINARY_OR, expression->binary.left->binary.op);
+    TEST_ASSERT_EQUAL(AST_EXPR_BINARY, expression->binary.left->binary.left->type);
+    TEST_ASSERT_EQUAL(AST_BINARY_EQ, expression->binary.left->binary.left->binary.op);
+    TEST_ASSERT_EQUAL(AST_EXPR_BINARY, expression->binary.left->binary.right->type);
+    TEST_ASSERT_EQUAL(AST_BINARY_EQ, expression->binary.left->binary.right->binary.op);
+    TEST_ASSERT_EQUAL(AST_EXPR_BINARY, expression->binary.right->type);
+    TEST_ASSERT_EQUAL(AST_BINARY_EQ, expression->binary.right->binary.op);
+
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_parser_builds_assignment_ast_with_expected_counts_and_shape);
@@ -194,5 +278,10 @@ int main(void) {
     RUN_TEST(test_parser_preserves_parenthesized_expression_grouping);
     RUN_TEST(test_parser_builds_left_associative_subtraction);
     RUN_TEST(test_parser_builds_left_associative_division);
+    RUN_TEST(test_parser_builds_relational_and_logical_expression_tree);
+    RUN_TEST(test_parser_preserves_relational_precedence_below_addition);
+    RUN_TEST(test_parser_builds_unary_negation_before_multiplication);
+    RUN_TEST(test_parser_applies_not_before_relational_operator_without_parentheses);
+    RUN_TEST(test_parser_builds_left_associative_logical_expression_chain);
     return UNITY_END();
 }

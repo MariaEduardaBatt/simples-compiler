@@ -137,6 +137,21 @@ static ASTExpression *parser_make_binary_expression(ASTBinaryOp op, ASTExpressio
     return expression;
 }
 
+static ASTExpression *parser_make_unary_expression(const Token *token, ASTUnaryOp op, ASTExpression *operand) {
+    ASTExpression *expression = calloc(1, sizeof(*expression));
+
+    if (expression == NULL) {
+        return NULL;
+    }
+
+    expression->type = AST_EXPR_UNARY;
+    expression->line = token != NULL ? token->line : 1;
+    expression->column = token != NULL ? token->column : 1;
+    expression->unary.op = op;
+    expression->unary.operand = operand;
+    return expression;
+}
+
 static bool parser_append_declaration(ASTProgram *program, ASTDeclaration declaration) {
     ASTDeclaration *items;
 
@@ -218,8 +233,32 @@ static ASTExpression *parse_factor(Parser *parser, CompilerError *error) {
     return NULL;
 }
 
-static ASTExpression *parse_term(Parser *parser, CompilerError *error) {
-    ASTExpression *left = parse_factor(parser, error);
+static ASTExpression *parse_unary(Parser *parser, CompilerError *error) {
+    if (parser_match(parser, TOK_NAO) || parser_match(parser, TOK_MENOS)) {
+        const Token *operator_token = parser_previous(parser);
+        ASTUnaryOp op = operator_token->type == TOK_NAO ? AST_UNARY_NOT : AST_UNARY_NEGATE;
+        ASTExpression *operand = parse_unary(parser, error);
+        ASTExpression *expression;
+
+        if (operand == NULL) {
+            return NULL;
+        }
+
+        expression = parser_make_unary_expression(operator_token, op, operand);
+        if (expression == NULL) {
+            ast_expression_free(operand);
+            parser_oom(parser, error);
+            return NULL;
+        }
+
+        return expression;
+    }
+
+    return parse_factor(parser, error);
+}
+
+static ASTExpression *parse_multiplicative(Parser *parser, CompilerError *error) {
+    ASTExpression *left = parse_unary(parser, error);
 
     if (left == NULL) {
         return NULL;
@@ -232,7 +271,129 @@ static ASTExpression *parse_term(Parser *parser, CompilerError *error) {
 
         parser_match(parser, parser_current(parser)->type);
         op = parser_previous(parser)->type == TOK_MULT ? AST_BINARY_MUL : AST_BINARY_DIV;
-        right = parse_factor(parser, error);
+        right = parse_unary(parser, error);
+        if (right == NULL) {
+            ast_expression_free(left);
+            return NULL;
+        }
+
+        combined = parser_make_binary_expression(op, left, right);
+        if (combined == NULL) {
+            ast_expression_free(left);
+            ast_expression_free(right);
+            parser_oom(parser, error);
+            return NULL;
+        }
+
+        left = combined;
+    }
+
+    return left;
+}
+
+static ASTExpression *parse_additive(Parser *parser, CompilerError *error) {
+    ASTExpression *left = parse_multiplicative(parser, error);
+
+    if (left == NULL) {
+        return NULL;
+    }
+
+    while (parser_check(parser, TOK_MAIS) || parser_check(parser, TOK_MENOS)) {
+        ASTBinaryOp op;
+        ASTExpression *right;
+        ASTExpression *combined;
+
+        parser_match(parser, parser_current(parser)->type);
+        op = parser_previous(parser)->type == TOK_MAIS ? AST_BINARY_ADD : AST_BINARY_SUB;
+        right = parse_multiplicative(parser, error);
+        if (right == NULL) {
+            ast_expression_free(left);
+            return NULL;
+        }
+
+        combined = parser_make_binary_expression(op, left, right);
+        if (combined == NULL) {
+            ast_expression_free(left);
+            ast_expression_free(right);
+            parser_oom(parser, error);
+            return NULL;
+        }
+
+        left = combined;
+    }
+
+    return left;
+}
+
+static ASTBinaryOp parser_relational_op(TokenType type) {
+    switch (type) {
+        case TOK_MAIOR:
+            return AST_BINARY_GT;
+        case TOK_MENOR:
+            return AST_BINARY_LT;
+        case TOK_IGUAL:
+            return AST_BINARY_EQ;
+        case TOK_DIFERENTE:
+            return AST_BINARY_NE;
+        case TOK_MAIOR_IGUAL:
+            return AST_BINARY_GE;
+        case TOK_MENOR_IGUAL:
+        default:
+            return AST_BINARY_LE;
+    }
+}
+
+static ASTExpression *parse_relational(Parser *parser, CompilerError *error) {
+    ASTExpression *left = parse_additive(parser, error);
+
+    if (left == NULL) {
+        return NULL;
+    }
+
+    if (parser_check(parser, TOK_MAIOR) || parser_check(parser, TOK_MENOR) ||
+        parser_check(parser, TOK_IGUAL) || parser_check(parser, TOK_DIFERENTE) ||
+        parser_check(parser, TOK_MAIOR_IGUAL) || parser_check(parser, TOK_MENOR_IGUAL)) {
+        ASTBinaryOp op;
+        ASTExpression *right;
+        ASTExpression *combined;
+
+        parser_match(parser, parser_current(parser)->type);
+        op = parser_relational_op(parser_previous(parser)->type);
+        right = parse_additive(parser, error);
+        if (right == NULL) {
+            ast_expression_free(left);
+            return NULL;
+        }
+
+        combined = parser_make_binary_expression(op, left, right);
+        if (combined == NULL) {
+            ast_expression_free(left);
+            ast_expression_free(right);
+            parser_oom(parser, error);
+            return NULL;
+        }
+
+        left = combined;
+    }
+
+    return left;
+}
+
+static ASTExpression *parse_logical(Parser *parser, CompilerError *error) {
+    ASTExpression *left = parse_relational(parser, error);
+
+    if (left == NULL) {
+        return NULL;
+    }
+
+    while (parser_check(parser, TOK_E) || parser_check(parser, TOK_OU)) {
+        ASTBinaryOp op;
+        ASTExpression *right;
+        ASTExpression *combined;
+
+        parser_match(parser, parser_current(parser)->type);
+        op = parser_previous(parser)->type == TOK_E ? AST_BINARY_AND : AST_BINARY_OR;
+        right = parse_relational(parser, error);
         if (right == NULL) {
             ast_expression_free(left);
             return NULL;
@@ -253,37 +414,7 @@ static ASTExpression *parse_term(Parser *parser, CompilerError *error) {
 }
 
 static ASTExpression *parse_expression(Parser *parser, CompilerError *error) {
-    ASTExpression *left = parse_term(parser, error);
-
-    if (left == NULL) {
-        return NULL;
-    }
-
-    while (parser_check(parser, TOK_MAIS) || parser_check(parser, TOK_MENOS)) {
-        ASTBinaryOp op;
-        ASTExpression *right;
-        ASTExpression *combined;
-
-        parser_match(parser, parser_current(parser)->type);
-        op = parser_previous(parser)->type == TOK_MAIS ? AST_BINARY_ADD : AST_BINARY_SUB;
-        right = parse_term(parser, error);
-        if (right == NULL) {
-            ast_expression_free(left);
-            return NULL;
-        }
-
-        combined = parser_make_binary_expression(op, left, right);
-        if (combined == NULL) {
-            ast_expression_free(left);
-            ast_expression_free(right);
-            parser_oom(parser, error);
-            return NULL;
-        }
-
-        left = combined;
-    }
-
-    return left;
+    return parse_logical(parser, error);
 }
 
 static bool parse_declaration_list(Parser *parser, ASTProgram *program, CompilerError *error) {
