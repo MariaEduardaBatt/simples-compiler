@@ -316,6 +316,20 @@ void test_parser_parses_for_loop_header_and_body(void) {
     token_list_free(&tokens);
 }
 
+void test_parser_parses_read_command_target(void) {
+    const char *source = "programa demo inteiro x; inicio leia x; fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+
+    TEST_ASSERT_EQUAL_size_t(1, program->command_count);
+    TEST_ASSERT_EQUAL(AST_COMMAND_READ, program->commands[0].type);
+    TEST_ASSERT_EQUAL_STRING("x", program->commands[0].read.name);
+    TEST_ASSERT_EQUAL_INT(1, program->commands[0].read.line);
+
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_parser_builds_assignment_ast_with_expected_counts_and_shape);
@@ -335,5 +349,6 @@ int main(void) {
     RUN_TEST(test_parser_parses_if_with_else_blocks);
     RUN_TEST(test_parser_parses_while_loop_body);
     RUN_TEST(test_parser_parses_for_loop_header_and_body);
+    RUN_TEST(test_parser_parses_read_command_target);
     return UNITY_END();
 }
