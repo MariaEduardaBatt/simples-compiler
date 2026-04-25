@@ -31,3 +31,9 @@ Thumbs.db
 *.gcno
 *.gcov
 coverage/
+
+# Claude
+.claude/
+
+# Git worktrees locais
+.worktrees/
