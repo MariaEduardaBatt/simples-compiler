@@ -300,6 +300,38 @@ void test_semantic_accepts_for_codegen_like_identifier_names(void) {
     token_list_free(&tokens);
 }
 
+void test_semantic_rejects_undeclared_read_target(void) {
+    const char *source = "programa demo inicio leia x; fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SymbolTable symbols = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &symbols, &error));
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_SEMANTIC, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Identificador 'x' nao declarado.", error.message);
+
+    symbol_table_free(&symbols);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_accepts_declared_read_target(void) {
+    const char *source = "programa demo inteiro x; inicio leia x; fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SymbolTable symbols = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &symbols, &error));
+    TEST_ASSERT_EQUAL_size_t(1, symbols.count);
+    TEST_ASSERT_EQUAL_STRING("x", symbols.names[0]);
+
+    symbol_table_free(&symbols);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_semantic_rejects_duplicate_declarations);
@@ -315,5 +347,7 @@ int main(void) {
     RUN_TEST(test_semantic_rejects_undeclared_identifier_in_while_condition);
     RUN_TEST(test_semantic_rejects_undeclared_for_iterator);
     RUN_TEST(test_semantic_accepts_for_codegen_like_identifier_names);
+    RUN_TEST(test_semantic_rejects_undeclared_read_target);
+    RUN_TEST(test_semantic_accepts_declared_read_target);
     return UNITY_END();
 }

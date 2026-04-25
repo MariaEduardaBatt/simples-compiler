@@ -135,6 +135,9 @@ static bool analyze_command(const ASTCommand *command, const SymbolTable *symbol
             return semantic_check_identifier(
                        symbols, command->assignment.name, command->assignment.line, command->assignment.column, error) &&
                    analyze_expression(command->assignment.expression, symbols, error);
+        case AST_COMMAND_READ:
+            return semantic_check_identifier(
+                symbols, command->read.name, command->read.line, command->read.column, error);
         case AST_COMMAND_WRITE:
         case AST_COMMAND_WRITELN:
             return analyze_expression(command->write.expression, symbols, error);
