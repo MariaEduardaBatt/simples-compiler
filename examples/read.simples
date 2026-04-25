@@ -1,0 +1,6 @@
+programa demo
+inteiro x;
+inicio
+  leia x;
+  escreval x;
+fim
