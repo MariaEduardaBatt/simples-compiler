@@ -190,7 +190,7 @@ void test_codegen_skips_for_body_when_step_is_zero(void) {
     char *assembly =
         generate_source("programa demo inteiro i; inicio para i de 1 ate 5 passo 0 faca escreva i; fimpara fim");
 
-    assert_contains(assembly, "    cmp eax, 0\n    je .Lendfor0");
+    assert_contains_in_order(assembly, "    cmp eax, 0\n    je .Lendfor0\n", ".Lforbody0:\n");
 
     free(assembly);
 }
@@ -199,7 +199,8 @@ void test_codegen_uses_negative_step_bound_check_for_for_loop(void) {
     char *assembly =
         generate_source("programa demo inteiro i; inicio para i de 5 ate 1 passo -1 faca escreva i; fimpara fim");
 
-    assert_contains(assembly, "    jl .Lendfor0");
+    assert_contains_in_order(assembly, "    jg .Lforpos0\n", "    jl .Lendfor0\n");
+    assert_contains_in_order(assembly, "    jl .Lendfor0\n", ".Lforbody0:\n");
 
     free(assembly);
 }
