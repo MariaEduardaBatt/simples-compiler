@@ -41,6 +41,23 @@ void test_lexer_scans_program_structure_into_expected_tokens(void) {
     token_list_free(&tokens);
 }
 
+void test_lexer_scans_control_flow_keywords_and_relational_operators(void) {
+    const char *source = "se x >= 1 entao escreva x; senao escreval 0; fimse";
+    TokenList tokens;
+    CompilerError error = {0};
+
+    token_list_init(&tokens);
+    TEST_ASSERT_TRUE(lexer_scan(source, &tokens, &error));
+
+    assert_token(&tokens, 0, TOK_SE, "se", 1, 1);
+    assert_token(&tokens, 2, TOK_MAIOR_IGUAL, ">=", 1, 6);
+    assert_token(&tokens, 4, TOK_ENTAO, "entao", 1, 11);
+    assert_token(&tokens, 8, TOK_SENAO, "senao", 1, 28);
+    assert_token(&tokens, 12, TOK_FIMSE, "fimse", 1, 46);
+
+    token_list_free(&tokens);
+}
+
 void test_lexer_tracks_line_and_column_across_multiple_lines(void) {
     const char *source = "programa demo\ninicio\nescreva 7;\nfim";
     TokenList tokens;
@@ -111,6 +128,7 @@ void test_lexer_resets_initialized_output_tokens_before_each_scan(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_lexer_scans_program_structure_into_expected_tokens);
+    RUN_TEST(test_lexer_scans_control_flow_keywords_and_relational_operators);
     RUN_TEST(test_lexer_tracks_line_and_column_across_multiple_lines);
     RUN_TEST(test_lexer_reports_invalid_character_with_line_information);
     RUN_TEST(test_lexer_accepts_zero_initialized_token_list);

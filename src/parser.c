@@ -137,6 +137,21 @@ static ASTExpression *parser_make_binary_expression(ASTBinaryOp op, ASTExpressio
     return expression;
 }
 
+static ASTExpression *parser_make_unary_expression(const Token *token, ASTUnaryOp op, ASTExpression *operand) {
+    ASTExpression *expression = calloc(1, sizeof(*expression));
+
+    if (expression == NULL) {
+        return NULL;
+    }
+
+    expression->type = AST_EXPR_UNARY;
+    expression->line = token != NULL ? token->line : 1;
+    expression->column = token != NULL ? token->column : 1;
+    expression->unary.op = op;
+    expression->unary.operand = operand;
+    return expression;
+}
+
 static bool parser_append_declaration(ASTProgram *program, ASTDeclaration declaration) {
     ASTDeclaration *items;
 
@@ -150,16 +165,16 @@ static bool parser_append_declaration(ASTProgram *program, ASTDeclaration declar
     return true;
 }
 
-static bool parser_append_command(ASTProgram *program, ASTCommand command) {
+static bool parser_append_command(ASTCommand **commands, size_t *count, ASTCommand command) {
     ASTCommand *items;
 
-    items = realloc(program->commands, (program->command_count + 1) * sizeof(*program->commands));
+    items = realloc(*commands, (*count + 1) * sizeof(**commands));
     if (items == NULL) {
         return false;
     }
 
-    program->commands = items;
-    program->commands[program->command_count++] = command;
+    *commands = items;
+    (*commands)[(*count)++] = command;
     return true;
 }
 
@@ -168,6 +183,52 @@ static bool parser_oom(const Parser *parser, CompilerError *error) {
 }
 
 static ASTExpression *parse_expression(Parser *parser, CompilerError *error);
+static bool parse_command(Parser *parser, ASTCommand *command, CompilerError *error);
+
+static bool parser_command_requires_semicolon(ASTCommandType type) {
+    return type == AST_COMMAND_ASSIGNMENT || type == AST_COMMAND_WRITE || type == AST_COMMAND_WRITELN;
+}
+
+static bool parser_is_terminator(const Parser *parser, const TokenType *terminators, size_t terminator_count) {
+    size_t index;
+
+    for (index = 0; index < terminator_count; ++index) {
+        if (parser_check(parser, terminators[index])) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool parse_command_list(
+    Parser *parser,
+    ASTCommand **commands,
+    size_t *command_count,
+    const TokenType *terminators,
+    size_t terminator_count,
+    CompilerError *error) {
+    while (!parser_is_terminator(parser, terminators, terminator_count) && !parser_check(parser, TOK_EOF)) {
+        ASTCommand command;
+
+        if (!parse_command(parser, &command, error)) {
+            return false;
+        }
+
+        if (parser_command_requires_semicolon(command.type) &&
+            !parser_expect(parser, TOK_PONTO_VIRGULA, error, "Esperado ';' apos comando.")) {
+            ast_command_free(&command);
+            return false;
+        }
+
+        if (!parser_append_command(commands, command_count, command)) {
+            ast_command_free(&command);
+            return parser_oom(parser, error);
+        }
+    }
+
+    return true;
+}
 
 static ASTExpression *parse_factor(Parser *parser, CompilerError *error) {
     const Token *token;
@@ -218,8 +279,32 @@ static ASTExpression *parse_factor(Parser *parser, CompilerError *error) {
     return NULL;
 }
 
-static ASTExpression *parse_term(Parser *parser, CompilerError *error) {
-    ASTExpression *left = parse_factor(parser, error);
+static ASTExpression *parse_unary(Parser *parser, CompilerError *error) {
+    if (parser_match(parser, TOK_NAO) || parser_match(parser, TOK_MENOS)) {
+        const Token *operator_token = parser_previous(parser);
+        ASTUnaryOp op = operator_token->type == TOK_NAO ? AST_UNARY_NOT : AST_UNARY_NEGATE;
+        ASTExpression *operand = parse_unary(parser, error);
+        ASTExpression *expression;
+
+        if (operand == NULL) {
+            return NULL;
+        }
+
+        expression = parser_make_unary_expression(operator_token, op, operand);
+        if (expression == NULL) {
+            ast_expression_free(operand);
+            parser_oom(parser, error);
+            return NULL;
+        }
+
+        return expression;
+    }
+
+    return parse_factor(parser, error);
+}
+
+static ASTExpression *parse_multiplicative(Parser *parser, CompilerError *error) {
+    ASTExpression *left = parse_unary(parser, error);
 
     if (left == NULL) {
         return NULL;
@@ -232,7 +317,130 @@ static ASTExpression *parse_term(Parser *parser, CompilerError *error) {
 
         parser_match(parser, parser_current(parser)->type);
         op = parser_previous(parser)->type == TOK_MULT ? AST_BINARY_MUL : AST_BINARY_DIV;
-        right = parse_factor(parser, error);
+        right = parse_unary(parser, error);
+        if (right == NULL) {
+            ast_expression_free(left);
+            return NULL;
+        }
+
+        combined = parser_make_binary_expression(op, left, right);
+        if (combined == NULL) {
+            ast_expression_free(left);
+            ast_expression_free(right);
+            parser_oom(parser, error);
+            return NULL;
+        }
+
+        left = combined;
+    }
+
+    return left;
+}
+
+static ASTExpression *parse_additive(Parser *parser, CompilerError *error) {
+    ASTExpression *left = parse_multiplicative(parser, error);
+
+    if (left == NULL) {
+        return NULL;
+    }
+
+    while (parser_check(parser, TOK_MAIS) || parser_check(parser, TOK_MENOS)) {
+        ASTBinaryOp op;
+        ASTExpression *right;
+        ASTExpression *combined;
+
+        parser_match(parser, parser_current(parser)->type);
+        op = parser_previous(parser)->type == TOK_MAIS ? AST_BINARY_ADD : AST_BINARY_SUB;
+        right = parse_multiplicative(parser, error);
+        if (right == NULL) {
+            ast_expression_free(left);
+            return NULL;
+        }
+
+        combined = parser_make_binary_expression(op, left, right);
+        if (combined == NULL) {
+            ast_expression_free(left);
+            ast_expression_free(right);
+            parser_oom(parser, error);
+            return NULL;
+        }
+
+        left = combined;
+    }
+
+    return left;
+}
+
+static ASTBinaryOp parser_relational_op(TokenType type) {
+    switch (type) {
+        case TOK_MAIOR:
+            return AST_BINARY_GT;
+        case TOK_MENOR:
+            return AST_BINARY_LT;
+        case TOK_IGUAL:
+            return AST_BINARY_EQ;
+        case TOK_DIFERENTE:
+            return AST_BINARY_NE;
+        case TOK_MAIOR_IGUAL:
+            return AST_BINARY_GE;
+        case TOK_MENOR_IGUAL:
+            return AST_BINARY_LE;
+        default:
+            abort();
+    }
+}
+
+static ASTExpression *parse_relational(Parser *parser, CompilerError *error) {
+    ASTExpression *left = parse_additive(parser, error);
+
+    if (left == NULL) {
+        return NULL;
+    }
+
+    if (parser_check(parser, TOK_MAIOR) || parser_check(parser, TOK_MENOR) ||
+        parser_check(parser, TOK_IGUAL) || parser_check(parser, TOK_DIFERENTE) ||
+        parser_check(parser, TOK_MAIOR_IGUAL) || parser_check(parser, TOK_MENOR_IGUAL)) {
+        ASTBinaryOp op;
+        ASTExpression *right;
+        ASTExpression *combined;
+
+        parser_match(parser, parser_current(parser)->type);
+        op = parser_relational_op(parser_previous(parser)->type);
+        right = parse_additive(parser, error);
+        if (right == NULL) {
+            ast_expression_free(left);
+            return NULL;
+        }
+
+        combined = parser_make_binary_expression(op, left, right);
+        if (combined == NULL) {
+            ast_expression_free(left);
+            ast_expression_free(right);
+            parser_oom(parser, error);
+            return NULL;
+        }
+
+        left = combined;
+    }
+
+    return left;
+}
+
+static ASTExpression *parse_logical(Parser *parser, CompilerError *error) {
+    ASTExpression *left = parse_relational(parser, error);
+
+    if (left == NULL) {
+        return NULL;
+    }
+
+    while (parser_check(parser, TOK_E) || parser_check(parser, TOK_OU)) {
+        ASTBinaryOp op;
+        ASTExpression *right;
+        ASTExpression *combined;
+
+        parser_match(parser, parser_current(parser)->type);
+        op = parser_previous(parser)->type == TOK_E ? AST_BINARY_AND : AST_BINARY_OR;
+        right = parse_relational(parser, error);
         if (right == NULL) {
             ast_expression_free(left);
             return NULL;
@@ -253,37 +461,7 @@ static ASTExpression *parse_term(Parser *parser, CompilerError *error) {
 }
 
 static ASTExpression *parse_expression(Parser *parser, CompilerError *error) {
-    ASTExpression *left = parse_term(parser, error);
-
-    if (left == NULL) {
-        return NULL;
-    }
-
-    while (parser_check(parser, TOK_MAIS) || parser_check(parser, TOK_MENOS)) {
-        ASTBinaryOp op;
-        ASTExpression *right;
-        ASTExpression *combined;
-
-        parser_match(parser, parser_current(parser)->type);
-        op = parser_previous(parser)->type == TOK_MAIS ? AST_BINARY_ADD : AST_BINARY_SUB;
-        right = parse_term(parser, error);
-        if (right == NULL) {
-            ast_expression_free(left);
-            return NULL;
-        }
-
-        combined = parser_make_binary_expression(op, left, right);
-        if (combined == NULL) {
-            ast_expression_free(left);
-            ast_expression_free(right);
-            parser_oom(parser, error);
-            return NULL;
-        }
-
-        left = combined;
-    }
-
-    return left;
+    return parse_logical(parser, error);
 }
 
 static bool parse_declaration_list(Parser *parser, ASTProgram *program, CompilerError *error) {
@@ -357,34 +535,172 @@ static bool parse_command(Parser *parser, ASTCommand *command, CompilerError *er
         return true;
     }
 
-    return parser_fail_current(parser, error, "Esperado comando.");
-}
+    if (parser_match(parser, TOK_SE)) {
+        static const TokenType then_terminators[] = {TOK_SENAO, TOK_FIMSE};
+        static const TokenType else_terminators[] = {TOK_FIMSE};
 
-static bool parse_command_list(Parser *parser, ASTProgram *program, CompilerError *error) {
-    while (!parser_check(parser, TOK_FIM) && !parser_check(parser, TOK_EOF)) {
-        ASTCommand command;
-
-        if (!parse_command(parser, &command, error)) {
+        command->type = AST_COMMAND_IF;
+        command->if_command.condition = parse_expression(parser, error);
+        if (command->if_command.condition == NULL) {
+            ast_command_free(command);
             return false;
         }
 
-        if (!parser_expect(parser, TOK_PONTO_VIRGULA, error, "Esperado ';' apos comando.")) {
-            ast_command_free(&command);
+        if (!parser_expect(parser, TOK_ENTAO, error, "Esperado 'entao'.")) {
+            ast_command_free(command);
             return false;
         }
 
-        if (!parser_append_command(program, command)) {
-            ast_command_free(&command);
-            return parser_oom(parser, error);
+        if (!parse_command_list(
+                parser,
+                &command->if_command.then_commands,
+                &command->if_command.then_count,
+                then_terminators,
+                sizeof(then_terminators) / sizeof(then_terminators[0]),
+                error)) {
+            ast_command_free(command);
+            return false;
         }
+
+        if (parser_match(parser, TOK_SENAO)) {
+            if (!parse_command_list(
+                    parser,
+                    &command->if_command.else_commands,
+                    &command->if_command.else_count,
+                    else_terminators,
+                    sizeof(else_terminators) / sizeof(else_terminators[0]),
+                    error)) {
+                ast_command_free(command);
+                return false;
+            }
+        }
+
+        if (!parser_expect(parser, TOK_FIMSE, error, "Esperado 'fimse'.")) {
+            ast_command_free(command);
+            return false;
+        }
+
+        return true;
     }
 
-    return true;
+    if (parser_match(parser, TOK_ENQUANTO)) {
+        static const TokenType body_terminators[] = {TOK_FIMENQUANTO};
+
+        command->type = AST_COMMAND_WHILE;
+        command->while_command.condition = parse_expression(parser, error);
+        if (command->while_command.condition == NULL) {
+            ast_command_free(command);
+            return false;
+        }
+
+        if (!parser_expect(parser, TOK_FACA, error, "Esperado 'faca'.")) {
+            ast_command_free(command);
+            return false;
+        }
+
+        if (!parse_command_list(
+                parser,
+                &command->while_command.body_commands,
+                &command->while_command.body_count,
+                body_terminators,
+                sizeof(body_terminators) / sizeof(body_terminators[0]),
+                error)) {
+            ast_command_free(command);
+            return false;
+        }
+
+        if (!parser_expect(parser, TOK_FIMENQUANTO, error, "Esperado 'fimenquanto'.")) {
+            ast_command_free(command);
+            return false;
+        }
+
+        return true;
+    }
+
+    if (parser_match(parser, TOK_PARA)) {
+        static const TokenType body_terminators[] = {TOK_FIMPARA};
+        const Token *iterator_token;
+
+        command->type = AST_COMMAND_FOR;
+
+        if (!parser_expect(parser, TOK_ID, error, "Esperado identificador apos 'para'.")) {
+            ast_command_free(command);
+            return false;
+        }
+
+        iterator_token = parser_previous(parser);
+        command->for_command.iterator_name = parser_strdup(iterator_token->lexeme);
+        if (command->for_command.iterator_name == NULL) {
+            ast_command_free(command);
+            return parser_oom(parser, error);
+        }
+        command->for_command.line = iterator_token->line;
+        command->for_command.column = iterator_token->column;
+
+        if (!parser_expect(parser, TOK_DE, error, "Esperado 'de'.")) {
+            ast_command_free(command);
+            return false;
+        }
+
+        command->for_command.start_expression = parse_expression(parser, error);
+        if (command->for_command.start_expression == NULL) {
+            ast_command_free(command);
+            return false;
+        }
+
+        if (!parser_expect(parser, TOK_ATE, error, "Esperado 'ate'.")) {
+            ast_command_free(command);
+            return false;
+        }
+
+        command->for_command.end_expression = parse_expression(parser, error);
+        if (command->for_command.end_expression == NULL) {
+            ast_command_free(command);
+            return false;
+        }
+
+        if (!parser_expect(parser, TOK_PASSO, error, "Esperado 'passo'.")) {
+            ast_command_free(command);
+            return false;
+        }
+
+        command->for_command.step_expression = parse_expression(parser, error);
+        if (command->for_command.step_expression == NULL) {
+            ast_command_free(command);
+            return false;
+        }
+
+        if (!parser_expect(parser, TOK_FACA, error, "Esperado 'faca'.")) {
+            ast_command_free(command);
+            return false;
+        }
+
+        if (!parse_command_list(
+                parser,
+                &command->for_command.body_commands,
+                &command->for_command.body_count,
+                body_terminators,
+                sizeof(body_terminators) / sizeof(body_terminators[0]),
+                error)) {
+            ast_command_free(command);
+            return false;
+        }
+
+        if (!parser_expect(parser, TOK_FIMPARA, error, "Esperado 'fimpara'.")) {
+            ast_command_free(command);
+            return false;
+        }
+
+        return true;
+    }
+
+    return parser_fail_current(parser, error, "Esperado comando.");
 }
 
 bool parse_program(const TokenList *tokens, ASTProgram **out_program, CompilerError *error) {
     Parser parser = {.tokens = tokens, .current = 0};
     ASTProgram *program;
+    static const TokenType command_terminators[] = {TOK_FIM};
 
     if (out_program == NULL) {
         compiler_error_set(error, COMPILER_PHASE_PARSER, 1, 1, "Saida invalida.");
@@ -419,7 +735,13 @@ bool parse_program(const TokenList *tokens, ASTProgram **out_program, CompilerEr
 
     if (!parse_declaration_list(&parser, program, error) ||
         !parser_expect(&parser, TOK_INICIO, error, "Esperado 'inicio'.") ||
-        !parse_command_list(&parser, program, error) ||
+        !parse_command_list(
+            &parser,
+            &program->commands,
+            &program->command_count,
+            command_terminators,
+            sizeof(command_terminators) / sizeof(command_terminators[0]),
+            error) ||
         !parser_expect(&parser, TOK_FIM, error, "Esperado 'fim'.") ||
         !parser_expect(&parser, TOK_EOF, error, "Esperado fim do arquivo.")) {
         ast_program_free(program);

@@ -1,0 +1,9 @@
+programa demo
+inteiro x;
+inicio
+  x <- 0;
+  enquanto x < 3 faca
+    x <- x + 1;
+    escreva x;
+  fimenquanto
+fim

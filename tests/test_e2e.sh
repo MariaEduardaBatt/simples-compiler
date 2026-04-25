@@ -87,4 +87,75 @@ nasm -f elf32 "$e2e_dir/print.asm" -o "$e2e_dir/print.o"
 ld -m elf_i386 "$e2e_dir/print.o" -o "$e2e_dir/print"
 output=$("$e2e_dir/print")
 [ "$output" = "1515" ]
+
+"$compiler" examples/if.simples "$e2e_dir/if.asm"
+nasm -f elf32 "$e2e_dir/if.asm" -o "$e2e_dir/if.o"
+ld -m elf_i386 "$e2e_dir/if.o" -o "$e2e_dir/if"
+[ "$("$e2e_dir/if")" = "1" ]
+
+"$compiler" examples/if_then.simples "$e2e_dir/if_then.asm"
+nasm -f elf32 "$e2e_dir/if_then.asm" -o "$e2e_dir/if_then.o"
+ld -m elf_i386 "$e2e_dir/if_then.o" -o "$e2e_dir/if_then"
+[ "$("$e2e_dir/if_then")" = "7" ]
+
+"$compiler" examples/if_then_else.simples "$e2e_dir/if_then_else.asm"
+nasm -f elf32 "$e2e_dir/if_then_else.asm" -o "$e2e_dir/if_then_else.o"
+ld -m elf_i386 "$e2e_dir/if_then_else.o" -o "$e2e_dir/if_then_else"
+[ "$("$e2e_dir/if_then_else")" = "0" ]
+
+cat >"$e2e_dir/if_false.simples" <<'EOF'
+programa demo
+inteiro x;
+inicio
+  x <- -1;
+  se x > 0 entao
+    escreval x;
+  senao
+    escreval 0;
+  fimse
+fim
+EOF
+"$compiler" "$e2e_dir/if_false.simples" "$e2e_dir/if_false.asm"
+nasm -f elf32 "$e2e_dir/if_false.asm" -o "$e2e_dir/if_false.o"
+ld -m elf_i386 "$e2e_dir/if_false.o" -o "$e2e_dir/if_false"
+[ "$("$e2e_dir/if_false")" = "0" ]
+
+"$compiler" examples/while.simples "$e2e_dir/while.asm"
+nasm -f elf32 "$e2e_dir/while.asm" -o "$e2e_dir/while.o"
+ld -m elf_i386 "$e2e_dir/while.o" -o "$e2e_dir/while"
+[ "$("$e2e_dir/while")" = "123" ]
+
+"$compiler" examples/for.simples "$e2e_dir/for.asm"
+nasm -f elf32 "$e2e_dir/for.asm" -o "$e2e_dir/for.o"
+ld -m elf_i386 "$e2e_dir/for.o" -o "$e2e_dir/for"
+[ "$("$e2e_dir/for")" = "15" ]
+
+cat >"$e2e_dir/for_negative_step.simples" <<'EOF'
+programa demo
+inteiro i;
+inicio
+  para i de 3 ate 1 passo -1 faca
+    escreva i;
+  fimpara
+fim
+EOF
+"$compiler" "$e2e_dir/for_negative_step.simples" "$e2e_dir/for_negative_step.asm"
+nasm -f elf32 "$e2e_dir/for_negative_step.asm" -o "$e2e_dir/for_negative_step.o"
+ld -m elf_i386 "$e2e_dir/for_negative_step.o" -o "$e2e_dir/for_negative_step"
+[ "$("$e2e_dir/for_negative_step")" = "321" ]
+
+cat >"$e2e_dir/for_zero_step.simples" <<'EOF'
+programa demo
+inteiro i;
+inicio
+  para i de 1 ate 3 passo 0 faca
+    escreva i;
+  fimpara
+fim
+EOF
+"$compiler" "$e2e_dir/for_zero_step.simples" "$e2e_dir/for_zero_step.asm"
+nasm -f elf32 "$e2e_dir/for_zero_step.asm" -o "$e2e_dir/for_zero_step.o"
+ld -m elf_i386 "$e2e_dir/for_zero_step.o" -o "$e2e_dir/for_zero_step"
+[ "$("$e2e_dir/for_zero_step")" = "" ]
+
 printf 'e2e ok\n'

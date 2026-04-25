@@ -37,12 +37,54 @@ const char *token_type_name(TokenType type) {
             return "TOK_ESCREVAL";
         case TOK_DIV:
             return "TOK_DIV";
+        case TOK_SE:
+            return "TOK_SE";
+        case TOK_ENTAO:
+            return "TOK_ENTAO";
+        case TOK_SENAO:
+            return "TOK_SENAO";
+        case TOK_FIMSE:
+            return "TOK_FIMSE";
+        case TOK_ENQUANTO:
+            return "TOK_ENQUANTO";
+        case TOK_FIMENQUANTO:
+            return "TOK_FIMENQUANTO";
+        case TOK_PARA:
+            return "TOK_PARA";
+        case TOK_DE:
+            return "TOK_DE";
+        case TOK_ATE:
+            return "TOK_ATE";
+        case TOK_PASSO:
+            return "TOK_PASSO";
+        case TOK_FACA:
+            return "TOK_FACA";
+        case TOK_FIMPARA:
+            return "TOK_FIMPARA";
+        case TOK_E:
+            return "TOK_E";
+        case TOK_OU:
+            return "TOK_OU";
+        case TOK_NAO:
+            return "TOK_NAO";
         case TOK_ID:
             return "TOK_ID";
         case TOK_NUM_INT:
             return "TOK_NUM_INT";
         case TOK_ATRIB:
             return "TOK_ATRIB";
+        case TOK_MAIOR:
+            return "TOK_MAIOR";
+        case TOK_MENOR:
+            return "TOK_MENOR";
+        case TOK_IGUAL:
+            return "TOK_IGUAL";
+        case TOK_DIFERENTE:
+            return "TOK_DIFERENTE";
+        case TOK_MAIOR_IGUAL:
+            return "TOK_MAIOR_IGUAL";
+        case TOK_MENOR_IGUAL:
+            return "TOK_MENOR_IGUAL";
         case TOK_MAIS:
             return "TOK_MAIS";
         case TOK_MENOS:

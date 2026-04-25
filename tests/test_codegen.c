@@ -109,6 +109,17 @@ void test_codegen_emits_add_sub_and_mul_instructions(void) {
     free(assembly);
 }
 
+void test_codegen_emits_unary_negation_and_logical_not_sequences(void) {
+    char *assembly = generate_source("programa demo inteiro x, y; inicio x <- -1; y <- nao x; fim");
+
+    assert_contains(assembly, "mov eax, 1\n    neg eax\n    mov dword [x], eax");
+    assert_contains(
+        assembly,
+        "mov eax, dword [x]\n    cmp eax, 0\n    sete al\n    movzx eax, al\n    mov dword [y], eax");
+
+    free(assembly);
+}
+
 void test_codegen_uses_program_declarations_when_symbol_names_are_missing(void) {
     char name[] = "x";
     ASTDeclaration declaration = {.name = name, .line = 1, .column = 1};
@@ -129,6 +140,88 @@ void test_codegen_returns_null_when_symbol_fallback_has_no_declarations(void) {
     TEST_ASSERT_NULL(codegen_generate_program(&program, &symbols));
 }
 
+void test_codegen_emits_labels_and_jump_for_if_else(void) {
+    char *assembly =
+        generate_source("programa demo inteiro x; inicio x <- 1; se x > 0 entao escreva x; senao escreval 0; fimse fim");
+
+    assert_contains(assembly, "cmp eax, 0");
+    assert_contains(assembly, "je .Lelse0");
+    assert_contains(assembly, "jmp .Lendif0");
+
+    free(assembly);
+}
+
+void test_codegen_emits_label_and_jump_for_if_without_else(void) {
+    char *assembly =
+        generate_source("programa demo inteiro x; inicio x <- 1; se x > 0 entao escreva x; fimse fim");
+
+    assert_contains(assembly, "cmp eax, 0");
+    assert_contains(assembly, "je .Lendif0");
+    TEST_ASSERT_NULL(strstr(assembly, ".Lelse0"));
+
+    free(assembly);
+}
+
+void test_codegen_emits_loop_labels_for_enquanto(void) {
+    char *assembly =
+        generate_source("programa demo inteiro x; inicio enquanto x < 3 faca x <- x + 1; fimenquanto fim");
+
+    assert_contains(assembly, ".Lwhile0:");
+    assert_contains(assembly, "je .Lendwhile0");
+    assert_contains(assembly, ".Lendwhile0:");
+    assert_contains(assembly, "jmp .Lwhile0");
+
+    free(assembly);
+}
+
+void test_codegen_materializes_for_bounds_and_step_once(void) {
+    char *assembly =
+        generate_source("programa demo inteiro i, total; inicio para i de 1 ate 3 passo 1 faca total <- total + i; fimpara fim");
+
+    assert_contains(assembly, "_for_end_0 dd 0");
+    assert_contains(assembly, "_for_step_0 dd 0");
+    assert_contains(assembly, ".Lfor0:");
+    assert_contains(assembly, ".Lendfor0:");
+
+    free(assembly);
+}
+
+void test_codegen_skips_for_body_when_step_is_zero(void) {
+    char *assembly =
+        generate_source("programa demo inteiro i; inicio para i de 1 ate 5 passo 0 faca escreva i; fimpara fim");
+
+    assert_contains_in_order(assembly, "    cmp eax, 0\n    je .Lendfor0\n", ".Lforbody0:\n");
+
+    free(assembly);
+}
+
+void test_codegen_uses_negative_step_bound_check_for_for_loop(void) {
+    char *assembly =
+        generate_source("programa demo inteiro i; inicio para i de 5 ate 1 passo -1 faca escreva i; fimpara fim");
+
+    assert_contains_in_order(assembly, "    jg .Lforpos0\n", "    jl .Lendfor0\n");
+    assert_contains_in_order(assembly, "    jl .Lendfor0\n", ".Lforbody0:\n");
+
+    free(assembly);
+}
+
+void test_codegen_escapes_user_identifiers_that_collide_with_for_temporaries(void) {
+    char *assembly =
+        generate_source("programa demo inteiro i, _for_end_0, _for_step_0; inicio _for_end_0 <- 3; _for_step_0 <- 1; para i de 1 ate _for_end_0 passo _for_step_0 faca escreva _for_end_0; fimpara fim");
+
+    assert_contains(assembly, "$_for_end_0 dd 0");
+    assert_contains(assembly, "$_for_step_0 dd 0");
+    assert_contains(assembly, "_for_end_0 dd 0");
+    assert_contains(assembly, "_for_step_0 dd 0");
+    assert_contains(assembly, "mov dword [$_for_end_0], 3");
+    assert_contains(assembly, "mov dword [$_for_step_0], 1");
+    assert_contains(assembly, "mov eax, dword [$_for_end_0]\n    mov dword [_for_end_0], eax");
+    assert_contains(assembly, "mov eax, dword [$_for_step_0]\n    mov dword [_for_step_0], eax");
+    assert_contains(assembly, "mov eax, dword [$_for_end_0]\n    call print_int");
+
+    free(assembly);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_codegen_emits_direct_store_for_integer_assignment);
@@ -137,7 +230,15 @@ int main(void) {
     RUN_TEST(test_codegen_emits_program_sections_and_helper_bodies_in_stable_order);
     RUN_TEST(test_codegen_emits_identifier_loads_and_plain_escreva_without_newline);
     RUN_TEST(test_codegen_emits_add_sub_and_mul_instructions);
+    RUN_TEST(test_codegen_emits_unary_negation_and_logical_not_sequences);
     RUN_TEST(test_codegen_uses_program_declarations_when_symbol_names_are_missing);
     RUN_TEST(test_codegen_returns_null_when_symbol_fallback_has_no_declarations);
+    RUN_TEST(test_codegen_emits_labels_and_jump_for_if_else);
+    RUN_TEST(test_codegen_emits_label_and_jump_for_if_without_else);
+    RUN_TEST(test_codegen_emits_loop_labels_for_enquanto);
+    RUN_TEST(test_codegen_materializes_for_bounds_and_step_once);
+    RUN_TEST(test_codegen_skips_for_body_when_step_is_zero);
+    RUN_TEST(test_codegen_uses_negative_step_bound_check_for_for_loop);
+    RUN_TEST(test_codegen_escapes_user_identifiers_that_collide_with_for_temporaries);
     return UNITY_END();
 }

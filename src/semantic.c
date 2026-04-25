@@ -116,6 +116,8 @@ static bool analyze_expression(const ASTExpression *expression, const SymbolTabl
             return true;
         case AST_EXPR_IDENTIFIER:
             return semantic_check_identifier(symbols, expression->identifier, expression->line, expression->column, error);
+        case AST_EXPR_UNARY:
+            return analyze_expression(expression->unary.operand, symbols, error);
         case AST_EXPR_BINARY:
             return analyze_expression(expression->binary.left, symbols, error) &&
                    analyze_expression(expression->binary.right, symbols, error);
@@ -123,6 +125,9 @@ static bool analyze_expression(const ASTExpression *expression, const SymbolTabl
             return semantic_fail_expression(expression, error, "Expressao invalida.");
     }
 }
+
+static bool analyze_command_list(
+    const ASTCommand *commands, size_t command_count, const SymbolTable *symbols, CompilerError *error);
 
 static bool analyze_command(const ASTCommand *command, const SymbolTable *symbols, CompilerError *error) {
     switch (command->type) {
@@ -133,9 +138,41 @@ static bool analyze_command(const ASTCommand *command, const SymbolTable *symbol
         case AST_COMMAND_WRITE:
         case AST_COMMAND_WRITELN:
             return analyze_expression(command->write.expression, symbols, error);
+        case AST_COMMAND_IF:
+            return analyze_expression(command->if_command.condition, symbols, error) &&
+                   analyze_command_list(command->if_command.then_commands, command->if_command.then_count, symbols, error) &&
+                   (command->if_command.else_count == 0 ||
+                    analyze_command_list(command->if_command.else_commands, command->if_command.else_count, symbols, error));
+        case AST_COMMAND_WHILE:
+            return analyze_expression(command->while_command.condition, symbols, error) &&
+                   analyze_command_list(command->while_command.body_commands, command->while_command.body_count, symbols, error);
+        case AST_COMMAND_FOR:
+            return semantic_check_identifier(
+                       symbols,
+                       command->for_command.iterator_name,
+                       command->for_command.line,
+                       command->for_command.column,
+                       error) &&
+                   analyze_expression(command->for_command.start_expression, symbols, error) &&
+                   analyze_expression(command->for_command.end_expression, symbols, error) &&
+                   analyze_expression(command->for_command.step_expression, symbols, error) &&
+                   analyze_command_list(command->for_command.body_commands, command->for_command.body_count, symbols, error);
         default:
             return semantic_fail(error, "Comando invalido.");
     }
+}
+
+static bool analyze_command_list(
+    const ASTCommand *commands, size_t command_count, const SymbolTable *symbols, CompilerError *error) {
+    size_t index;
+
+    for (index = 0; index < command_count; ++index) {
+        if (!analyze_command(&commands[index], symbols, error)) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 bool analyze_program(const ASTProgram *program, SymbolTable *out_symbols, CompilerError *error) {
@@ -169,11 +206,9 @@ bool analyze_program(const ASTProgram *program, SymbolTable *out_symbols, Compil
         }
     }
 
-    for (index = 0; index < program->command_count; ++index) {
-        if (!analyze_command(&program->commands[index], &symbols, error)) {
-            symbol_table_free(&symbols);
-            return false;
-        }
+    if (!analyze_command_list(program->commands, program->command_count, &symbols, error)) {
+        symbol_table_free(&symbols);
+        return false;
     }
 
     *out_symbols = symbols;
