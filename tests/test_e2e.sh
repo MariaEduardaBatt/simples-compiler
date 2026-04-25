@@ -164,10 +164,7 @@ ld -m elf_i386 "$e2e_dir/read.o" -o "$e2e_dir/read"
 output=$(printf '42\n' | "$e2e_dir/read")
 [ "$output" = "42" ]
 
-"$compiler" examples/read.simples "$e2e_dir/read_neg.asm"
-nasm -f elf32 "$e2e_dir/read_neg.asm" -o "$e2e_dir/read_neg.o"
-ld -m elf_i386 "$e2e_dir/read_neg.o" -o "$e2e_dir/read_neg"
-output=$(printf '%s\n' '-17' | "$e2e_dir/read_neg")
+output=$(printf '%s\n' '-17' | "$e2e_dir/read")
 [ "$output" = "-17" ]
 
 printf 'e2e ok\n'
