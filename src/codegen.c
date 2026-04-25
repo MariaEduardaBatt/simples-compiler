@@ -232,6 +232,7 @@ static bool collect_for_loop_ids_in_command(SizeList *for_loop_ids, size_t *next
                    collect_for_loop_ids_in_block(
                        for_loop_ids, next_label_id, command->for_command.body_commands, command->for_command.body_count);
         case AST_COMMAND_ASSIGNMENT:
+        case AST_COMMAND_READ:
         case AST_COMMAND_WRITE:
         case AST_COMMAND_WRITELN:
             return true;
@@ -340,6 +341,9 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command)
 
             return generate_expression(context, command->assignment.expression) &&
                    builder_append_store_eax_to_identifier(builder, context->for_loop_ids, command->assignment.name);
+        case AST_COMMAND_READ:
+            return builder_append(builder, "    call read_int\n") &&
+                   builder_append_store_eax_to_identifier(builder, context->for_loop_ids, command->read.name);
         case AST_COMMAND_WRITE:
             return generate_expression(context, command->write.expression) &&
                    builder_append(builder, "    call print_int\n");
@@ -433,6 +437,45 @@ static bool generate_helpers(StringBuilder *builder) {
     return builder_append(
                builder,
                "\n"
+               "read_int:\n"
+               "    mov eax, 3\n"
+               "    mov ebx, 0\n"
+               "    mov ecx, read_buffer\n"
+               "    mov edx, 16\n"
+               "    int 0x80\n"
+               "    cmp eax, 0\n"
+               "    jle .read_int_eof\n"
+               "    xor esi, esi\n"
+               "    xor edi, edi\n"
+               "    mov ecx, read_buffer\n"
+               "    cmp byte [ecx], '-'\n"
+               "    jne .read_int_digits\n"
+               "    mov esi, 1\n"
+               "    inc ecx\n"
+               ".read_int_digits:\n"
+               "    movzx eax, byte [ecx]\n"
+               "    cmp al, 0\n"
+               "    je .read_int_done\n"
+               "    cmp al, 10\n"
+               "    je .read_int_done\n"
+               "    cmp al, 13\n"
+               "    je .read_int_done\n"
+               "    sub al, '0'\n"
+               "    imul edi, edi, 10\n"
+               "    add edi, eax\n"
+               "    inc ecx\n"
+               "    jmp .read_int_digits\n"
+               ".read_int_done:\n"
+               "    mov eax, edi\n"
+               "    cmp esi, 0\n"
+               "    je .read_int_ret\n"
+               "    neg eax\n"
+               ".read_int_ret:\n"
+               "    ret\n"
+               ".read_int_eof:\n"
+               "    xor eax, eax\n"
+               "    ret\n"
+               "\n"
                "print_int:\n"
                "    mov esi, eax\n"
                "    xor ecx, ecx\n"
@@ -516,7 +559,7 @@ char *codegen_generate_program(const ASTProgram *program, const SymbolTable *sym
         }
     }
 
-    if (!builder_append(&builder, "newline db 10\nprint_buffer times 12 db 0\n\nsection .text\n_start:\n")) {
+    if (!builder_append(&builder, "newline db 10\nprint_buffer times 12 db 0\nread_buffer times 16 db 0\n\nsection .text\n_start:\n")) {
         free(for_loop_ids.items);
         free(builder.data);
         return NULL;

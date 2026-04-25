@@ -79,7 +79,7 @@ void test_codegen_emits_program_sections_and_helper_bodies_in_stable_order(void)
 
     assert_contains_in_order(assembly, "global _start\n\nsection .data\n", "x dd 0\n");
     assert_contains_in_order(
-        assembly, "x dd 0\n", "newline db 10\nprint_buffer times 12 db 0\n\nsection .text\n_start:\n");
+        assembly, "x dd 0\n", "newline db 10\nprint_buffer times 12 db 0\nread_buffer times 16 db 0\n\nsection .text\n_start:\n");
     assert_contains_in_order(assembly, "section .text\n_start:\n", "    mov eax, 1\n    xor ebx, ebx\n    int 0x80\n");
     assert_contains_in_order(assembly, "    int 0x80\n", "\nprint_int:\n");
     assert_contains_in_order(assembly, "\nprint_int:\n", "\nprint_newline:\n");
@@ -222,6 +222,26 @@ void test_codegen_escapes_user_identifiers_that_collide_with_for_temporaries(voi
     free(assembly);
 }
 
+void test_codegen_emits_read_call_and_store_for_leia(void) {
+    char *assembly = generate_source("programa demo inteiro x; inicio leia x; fim");
+
+    assert_contains(assembly, "call read_int");
+    assert_contains(assembly, "mov dword [x], eax");
+
+    free(assembly);
+}
+
+void test_codegen_emits_read_buffer_and_helper_body(void) {
+    char *assembly = generate_source("programa demo inteiro x; inicio leia x; escreval x; fim");
+
+    assert_contains(assembly, "read_buffer times 16 db 0");
+    assert_contains(assembly, "\nread_int:\n");
+    assert_contains(assembly, "mov eax, 3");
+    assert_contains(assembly, "mov ebx, 0");
+
+    free(assembly);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_codegen_emits_direct_store_for_integer_assignment);
@@ -240,5 +260,7 @@ int main(void) {
     RUN_TEST(test_codegen_skips_for_body_when_step_is_zero);
     RUN_TEST(test_codegen_uses_negative_step_bound_check_for_for_loop);
     RUN_TEST(test_codegen_escapes_user_identifiers_that_collide_with_for_temporaries);
+    RUN_TEST(test_codegen_emits_read_call_and_store_for_leia);
+    RUN_TEST(test_codegen_emits_read_buffer_and_helper_body);
     return UNITY_END();
 }
