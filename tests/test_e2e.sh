@@ -93,6 +93,23 @@ nasm -f elf32 "$e2e_dir/if.asm" -o "$e2e_dir/if.o"
 ld -m elf_i386 "$e2e_dir/if.o" -o "$e2e_dir/if"
 [ "$("$e2e_dir/if")" = "1" ]
 
+cat >"$e2e_dir/if_false.simples" <<'EOF'
+programa demo
+inteiro x;
+inicio
+  x <- -1;
+  se x > 0 entao
+    escreval x;
+  senao
+    escreval 0;
+  fimse
+fim
+EOF
+"$compiler" "$e2e_dir/if_false.simples" "$e2e_dir/if_false.asm"
+nasm -f elf32 "$e2e_dir/if_false.asm" -o "$e2e_dir/if_false.o"
+ld -m elf_i386 "$e2e_dir/if_false.o" -o "$e2e_dir/if_false"
+[ "$("$e2e_dir/if_false")" = "0" ]
+
 "$compiler" examples/while.simples "$e2e_dir/while.asm"
 nasm -f elf32 "$e2e_dir/while.asm" -o "$e2e_dir/while.o"
 ld -m elf_i386 "$e2e_dir/while.o" -o "$e2e_dir/while"
