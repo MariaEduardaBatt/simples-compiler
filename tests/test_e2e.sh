@@ -167,4 +167,10 @@ output=$(printf '42\n' | "$e2e_dir/read")
 output=$(printf '%s\n' '-17' | "$e2e_dir/read")
 [ "$output" = "-17" ]
 
+output=$(printf '%s\n' '42abc' | "$e2e_dir/read")
+[ "$output" = "42" ]
+
+output=$(printf '%s\n' '-5xyz' | "$e2e_dir/read")
+[ "$output" = "-5" ]
+
 printf 'e2e ok\n'

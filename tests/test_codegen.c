@@ -242,6 +242,24 @@ void test_codegen_emits_read_buffer_and_helper_body(void) {
     free(assembly);
 }
 
+void test_codegen_read_int_validates_digit_characters(void) {
+    char *assembly = generate_source("programa demo inteiro x; inicio leia x; fim");
+
+    assert_contains_in_order(assembly, "    cmp al, '0'\n    jb .read_int_done\n", "    cmp al, '9'\n    ja .read_int_done\n");
+    assert_contains_in_order(assembly, "    cmp al, '9'\n    ja .read_int_done\n", "    sub al, '0'\n");
+
+    free(assembly);
+}
+
+void test_codegen_read_int_bounds_loop_to_bytes_read(void) {
+    char *assembly = generate_source("programa demo inteiro x; inicio leia x; fim");
+
+    assert_contains(assembly, "    lea edx, [read_buffer + eax]\n");
+    assert_contains_in_order(assembly, ".read_int_digits:\n", "    cmp ecx, edx\n    jae .read_int_done\n");
+
+    free(assembly);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_codegen_emits_direct_store_for_integer_assignment);
@@ -262,5 +280,7 @@ int main(void) {
     RUN_TEST(test_codegen_escapes_user_identifiers_that_collide_with_for_temporaries);
     RUN_TEST(test_codegen_emits_read_call_and_store_for_leia);
     RUN_TEST(test_codegen_emits_read_buffer_and_helper_body);
+    RUN_TEST(test_codegen_read_int_validates_digit_characters);
+    RUN_TEST(test_codegen_read_int_bounds_loop_to_bytes_read);
     return UNITY_END();
 }
