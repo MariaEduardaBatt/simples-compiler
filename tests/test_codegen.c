@@ -260,6 +260,42 @@ void test_codegen_read_int_bounds_loop_to_bytes_read(void) {
     free(assembly);
 }
 
+void test_codegen_read_int_clamps_on_overflow(void) {
+    char *assembly = generate_source("programa demo inteiro x; inicio leia x; fim");
+
+    /* threshold check: accumulator vs 214748364 before multiply */
+    assert_contains_in_order(assembly,
+        "    sub al, '0'\n",
+        "    cmp edi, 214748364\n"
+        "    jg .read_int_overflow\n"
+        "    jl .read_int_no_overflow\n");
+
+    /* digit-level threshold: positive limit = 7, negative limit = 8 */
+    assert_contains_in_order(assembly,
+        "    jl .read_int_no_overflow\n",
+        "    cmp esi, 0\n"
+        "    je .read_int_check_pos_digit\n"
+        "    cmp al, 8\n"
+        "    jg .read_int_overflow\n"
+        "    jmp .read_int_no_overflow\n"
+        ".read_int_check_pos_digit:\n"
+        "    cmp al, 7\n"
+        "    jg .read_int_overflow\n");
+
+    /* clamp paths: INT_MAX for positive, INT_MIN for negative */
+    assert_contains(assembly,
+        ".read_int_overflow:\n"
+        "    cmp esi, 0\n"
+        "    je .read_int_clamp_pos\n"
+        "    mov eax, 0x80000000\n"
+        "    ret\n"
+        ".read_int_clamp_pos:\n"
+        "    mov eax, 0x7fffffff\n"
+        "    ret\n");
+
+    free(assembly);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_codegen_emits_direct_store_for_integer_assignment);
@@ -282,5 +318,6 @@ int main(void) {
     RUN_TEST(test_codegen_emits_read_buffer_and_helper_body);
     RUN_TEST(test_codegen_read_int_validates_digit_characters);
     RUN_TEST(test_codegen_read_int_bounds_loop_to_bytes_read);
+    RUN_TEST(test_codegen_read_int_clamps_on_overflow);
     return UNITY_END();
 }

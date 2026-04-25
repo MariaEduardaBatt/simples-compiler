@@ -173,4 +173,22 @@ output=$(printf '%s\n' '42abc' | "$e2e_dir/read")
 output=$(printf '%s\n' '-5xyz' | "$e2e_dir/read")
 [ "$output" = "-5" ]
 
+# INT_MAX and INT_MIN are accepted exactly
+output=$(printf '%s\n' '2147483647' | "$e2e_dir/read")
+[ "$output" = "2147483647" ]
+
+output=$(printf '%s\n' '-2147483648' | "$e2e_dir/read")
+[ "$output" = "-2147483648" ]
+
+# positive overflow clamps to INT_MAX
+output=$(printf '%s\n' '2147483648' | "$e2e_dir/read")
+[ "$output" = "2147483647" ]
+
+output=$(printf '%s\n' '9999999999' | "$e2e_dir/read")
+[ "$output" = "2147483647" ]
+
+# negative overflow clamps to INT_MIN
+output=$(printf '%s\n' '-2147483649' | "$e2e_dir/read")
+[ "$output" = "-2147483648" ]
+
 printf 'e2e ok\n'
