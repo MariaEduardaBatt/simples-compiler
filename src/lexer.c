@@ -62,6 +62,9 @@ static TokenType lexer_keyword_type(const char *start, size_t length) {
     if (lexer_span_is(start, length, "escreval")) {
         return TOK_ESCREVAL;
     }
+    if (lexer_span_is(start, length, "leia")) {
+        return TOK_LEIA;
+    }
     if (lexer_span_is(start, length, "div")) {
         return TOK_DIV;
     }

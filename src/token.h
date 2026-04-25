@@ -23,6 +23,7 @@ typedef enum {
     TOK_FIMPARA,
     TOK_ESCREVA,
     TOK_ESCREVAL,
+    TOK_LEIA,
     TOK_E,
     TOK_OU,
     TOK_NAO,
