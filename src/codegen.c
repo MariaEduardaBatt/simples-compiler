@@ -109,13 +109,15 @@ static bool size_list_append(SizeList *list, size_t value) {
 static bool for_loop_temp_name_equals(const SizeList *for_loop_ids, const char *prefix, const char *name) {
     char expected[64];
     size_t index;
+    int written;
 
     if (for_loop_ids == NULL || name == NULL) {
         return false;
     }
 
     for (index = 0; index < for_loop_ids->count; ++index) {
-        if (snprintf(expected, sizeof(expected), "%s%zu", prefix, for_loop_ids->items[index]) < 0) {
+        written = snprintf(expected, sizeof(expected), "%s%zu", prefix, for_loop_ids->items[index]);
+        if (written < 0 || (size_t)written >= sizeof(expected)) {
             return false;
         }
 
@@ -343,8 +345,8 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command)
                    builder_append(builder, "    call print_int\n");
         case AST_COMMAND_WRITELN:
             return generate_expression(context, command->write.expression) &&
-                    builder_append(builder, "    call print_int\n") &&
-                    builder_append(builder, "    call print_newline\n");
+                   builder_append(builder, "    call print_int\n") &&
+                   builder_append(builder, "    call print_newline\n");
         case AST_COMMAND_IF: {
             size_t label_id = context->next_label_id++;
 
@@ -372,10 +374,10 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command)
             return builder_appendf(builder, ".Lwhile%zu:\n", label_id) &&
                    generate_expression(context, command->while_command.condition) &&
                    builder_append(builder, "    cmp eax, 0\n") &&
-                    builder_appendf(builder, "    je .Lendwhile%zu\n", label_id) &&
-                     generate_command_block(context, command->while_command.body_commands, command->while_command.body_count) &&
-                    builder_appendf(builder, "    jmp .Lwhile%zu\n", label_id) &&
-                    builder_appendf(builder, ".Lendwhile%zu:\n", label_id);
+                   builder_appendf(builder, "    je .Lendwhile%zu\n", label_id) &&
+                   generate_command_block(context, command->while_command.body_commands, command->while_command.body_count) &&
+                   builder_appendf(builder, "    jmp .Lwhile%zu\n", label_id) &&
+                   builder_appendf(builder, ".Lendwhile%zu:\n", label_id);
         }
         case AST_COMMAND_FOR: {
             size_t label_id = context->next_label_id++;
