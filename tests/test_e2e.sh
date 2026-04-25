@@ -120,4 +120,32 @@ nasm -f elf32 "$e2e_dir/for.asm" -o "$e2e_dir/for.o"
 ld -m elf_i386 "$e2e_dir/for.o" -o "$e2e_dir/for"
 [ "$("$e2e_dir/for")" = "15" ]
 
+cat >"$e2e_dir/for_negative_step.simples" <<'EOF'
+programa demo
+inteiro i;
+inicio
+  para i de 3 ate 1 passo -1 faca
+    escreva i;
+  fimpara
+fim
+EOF
+"$compiler" "$e2e_dir/for_negative_step.simples" "$e2e_dir/for_negative_step.asm"
+nasm -f elf32 "$e2e_dir/for_negative_step.asm" -o "$e2e_dir/for_negative_step.o"
+ld -m elf_i386 "$e2e_dir/for_negative_step.o" -o "$e2e_dir/for_negative_step"
+[ "$("$e2e_dir/for_negative_step")" = "321" ]
+
+cat >"$e2e_dir/for_zero_step.simples" <<'EOF'
+programa demo
+inteiro i;
+inicio
+  para i de 1 ate 3 passo 0 faca
+    escreva i;
+  fimpara
+fim
+EOF
+"$compiler" "$e2e_dir/for_zero_step.simples" "$e2e_dir/for_zero_step.asm"
+nasm -f elf32 "$e2e_dir/for_zero_step.asm" -o "$e2e_dir/for_zero_step.o"
+ld -m elf_i386 "$e2e_dir/for_zero_step.o" -o "$e2e_dir/for_zero_step"
+[ "$("$e2e_dir/for_zero_step")" = "" ]
+
 printf 'e2e ok\n'
