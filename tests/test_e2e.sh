@@ -93,6 +93,16 @@ nasm -f elf32 "$e2e_dir/if.asm" -o "$e2e_dir/if.o"
 ld -m elf_i386 "$e2e_dir/if.o" -o "$e2e_dir/if"
 [ "$("$e2e_dir/if")" = "1" ]
 
+"$compiler" examples/if_then.simples "$e2e_dir/if_then.asm"
+nasm -f elf32 "$e2e_dir/if_then.asm" -o "$e2e_dir/if_then.o"
+ld -m elf_i386 "$e2e_dir/if_then.o" -o "$e2e_dir/if_then"
+[ "$("$e2e_dir/if_then")" = "7" ]
+
+"$compiler" examples/if_then_else.simples "$e2e_dir/if_then_else.asm"
+nasm -f elf32 "$e2e_dir/if_then_else.asm" -o "$e2e_dir/if_then_else.o"
+ld -m elf_i386 "$e2e_dir/if_then_else.o" -o "$e2e_dir/if_then_else"
+[ "$("$e2e_dir/if_then_else")" = "0" ]
+
 cat >"$e2e_dir/if_false.simples" <<'EOF'
 programa demo
 inteiro x;

@@ -1,0 +1,10 @@
+programa demo
+inteiro x;
+inicio
+  x <- -1;
+  se x > 0 entao
+    escreval x;
+  senao
+    escreval 0;
+  fimse
+fim

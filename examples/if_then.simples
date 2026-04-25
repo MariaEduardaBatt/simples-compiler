@@ -1,0 +1,8 @@
+programa demo
+inteiro x;
+inicio
+  x <- 7;
+  se x > 0 entao
+    escreval x;
+  fimse
+fim
