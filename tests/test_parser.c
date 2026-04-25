@@ -103,6 +103,22 @@ void test_parser_reports_error_for_integer_literal_overflow(void) {
     token_list_free(&tokens);
 }
 
+void test_parser_reports_error_for_leia_without_identifier(void) {
+    const char *source = "programa demo inteiro x; inicio leia; fim";
+    TokenList tokens;
+    CompilerError error = {0};
+    ASTProgram *program = NULL;
+
+    scan_source(source, &tokens);
+
+    TEST_ASSERT_FALSE(parse_program(&tokens, &program, &error));
+    TEST_ASSERT_NULL(program);
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_PARSER, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Esperado identificador apos 'leia'.", error.message);
+
+    token_list_free(&tokens);
+}
+
 void test_parser_supports_comma_separated_integer_declarations(void) {
     const char *source = "programa demo inteiro x, y, total; inicio fim";
     TokenList tokens;
@@ -336,6 +352,7 @@ int main(void) {
     RUN_TEST(test_parser_respects_multiplication_precedence_in_assignment_expression);
     RUN_TEST(test_parser_reports_error_for_missing_command_semicolon);
     RUN_TEST(test_parser_reports_error_for_integer_literal_overflow);
+    RUN_TEST(test_parser_reports_error_for_leia_without_identifier);
     RUN_TEST(test_parser_supports_comma_separated_integer_declarations);
     RUN_TEST(test_parser_parses_escreva_and_escreval_commands);
     RUN_TEST(test_parser_preserves_parenthesized_expression_grouping);
