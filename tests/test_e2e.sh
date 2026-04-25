@@ -191,4 +191,11 @@ output=$(printf '%s\n' '9999999999' | "$e2e_dir/read")
 output=$(printf '%s\n' '-2147483649' | "$e2e_dir/read")
 [ "$output" = "-2147483648" ]
 
+# extra digits after reaching the negative boundary must not resume accumulation
+output=$(printf '%s\n' '-21474836480' | "$e2e_dir/read")
+[ "$output" = "-2147483648" ]
+
+output=$(printf '%s\n' '-21474836489' | "$e2e_dir/read")
+[ "$output" = "-2147483648" ]
+
 printf 'e2e ok\n'

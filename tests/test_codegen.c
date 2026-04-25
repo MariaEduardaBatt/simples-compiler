@@ -282,9 +282,32 @@ void test_codegen_read_int_clamps_on_overflow(void) {
         "    cmp al, 7\n"
         "    jg .read_int_overflow\n");
 
-    /* clamp paths: INT_MAX for positive, INT_MIN for negative */
+    /* post-accumulation signed-overflow guard: catches 0x80000000 wrap */
     assert_contains(assembly,
+        ".read_int_no_overflow:\n"
+        "    imul edi, edi, 10\n"
+        "    add edi, eax\n"
+        "    js .read_int_limit_hit\n"
+        "    inc ecx\n"
+        "    jmp .read_int_digits\n"
+        ".read_int_limit_hit:\n"
+        "    inc ecx\n");
+
+    /* overflow drain loop: consume remaining digits then clamp */
+    assert_contains(assembly,
+        ".read_int_limit_hit:\n"
+        "    inc ecx\n"
         ".read_int_overflow:\n"
+        "    cmp ecx, edx\n"
+        "    jae .read_int_overflow_ret\n"
+        "    movzx eax, byte [ecx]\n"
+        "    cmp al, '0'\n"
+        "    jb .read_int_overflow_ret\n"
+        "    cmp al, '9'\n"
+        "    ja .read_int_overflow_ret\n"
+        "    inc ecx\n"
+        "    jmp .read_int_overflow\n"
+        ".read_int_overflow_ret:\n"
         "    cmp esi, 0\n"
         "    je .read_int_clamp_pos\n"
         "    mov eax, 0x80000000\n"
