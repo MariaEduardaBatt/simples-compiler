@@ -1,0 +1,9 @@
+programa demo
+inteiro i, total;
+inicio
+  total <- 0;
+  para i de 1 ate 5 passo 1 faca
+    total <- total + i;
+  fimpara
+  escreval total;
+fim

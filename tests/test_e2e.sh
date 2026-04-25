@@ -87,4 +87,20 @@ nasm -f elf32 "$e2e_dir/print.asm" -o "$e2e_dir/print.o"
 ld -m elf_i386 "$e2e_dir/print.o" -o "$e2e_dir/print"
 output=$("$e2e_dir/print")
 [ "$output" = "1515" ]
+
+"$compiler" examples/if.simples "$e2e_dir/if.asm"
+nasm -f elf32 "$e2e_dir/if.asm" -o "$e2e_dir/if.o"
+ld -m elf_i386 "$e2e_dir/if.o" -o "$e2e_dir/if"
+[ "$("$e2e_dir/if")" = "1" ]
+
+"$compiler" examples/while.simples "$e2e_dir/while.asm"
+nasm -f elf32 "$e2e_dir/while.asm" -o "$e2e_dir/while.o"
+ld -m elf_i386 "$e2e_dir/while.o" -o "$e2e_dir/while"
+[ "$("$e2e_dir/while")" = "123" ]
+
+"$compiler" examples/for.simples "$e2e_dir/for.asm"
+nasm -f elf32 "$e2e_dir/for.asm" -o "$e2e_dir/for.o"
+ld -m elf_i386 "$e2e_dir/for.o" -o "$e2e_dir/for"
+[ "$("$e2e_dir/for")" = "15" ]
+
 printf 'e2e ok\n'
