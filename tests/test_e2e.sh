@@ -158,4 +158,44 @@ nasm -f elf32 "$e2e_dir/for_zero_step.asm" -o "$e2e_dir/for_zero_step.o"
 ld -m elf_i386 "$e2e_dir/for_zero_step.o" -o "$e2e_dir/for_zero_step"
 [ "$("$e2e_dir/for_zero_step")" = "" ]
 
+"$compiler" examples/read.simples "$e2e_dir/read.asm"
+nasm -f elf32 "$e2e_dir/read.asm" -o "$e2e_dir/read.o"
+ld -m elf_i386 "$e2e_dir/read.o" -o "$e2e_dir/read"
+output=$(printf '42\n' | "$e2e_dir/read")
+[ "$output" = "42" ]
+
+output=$(printf '%s\n' '-17' | "$e2e_dir/read")
+[ "$output" = "-17" ]
+
+output=$(printf '%s\n' '42abc' | "$e2e_dir/read")
+[ "$output" = "42" ]
+
+output=$(printf '%s\n' '-5xyz' | "$e2e_dir/read")
+[ "$output" = "-5" ]
+
+# INT_MAX and INT_MIN are accepted exactly
+output=$(printf '%s\n' '2147483647' | "$e2e_dir/read")
+[ "$output" = "2147483647" ]
+
+output=$(printf '%s\n' '-2147483648' | "$e2e_dir/read")
+[ "$output" = "-2147483648" ]
+
+# positive overflow clamps to INT_MAX
+output=$(printf '%s\n' '2147483648' | "$e2e_dir/read")
+[ "$output" = "2147483647" ]
+
+output=$(printf '%s\n' '9999999999' | "$e2e_dir/read")
+[ "$output" = "2147483647" ]
+
+# negative overflow clamps to INT_MIN
+output=$(printf '%s\n' '-2147483649' | "$e2e_dir/read")
+[ "$output" = "-2147483648" ]
+
+# extra digits after reaching the negative boundary must not resume accumulation
+output=$(printf '%s\n' '-21474836480' | "$e2e_dir/read")
+[ "$output" = "-2147483648" ]
+
+output=$(printf '%s\n' '-21474836489' | "$e2e_dir/read")
+[ "$output" = "-2147483648" ]
+
 printf 'e2e ok\n'

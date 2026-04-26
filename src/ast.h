@@ -59,8 +59,15 @@ typedef struct {
     int column;
 } ASTDeclaration;
 
+typedef struct {
+    char *name;
+    int line;
+    int column;
+} ASTReadCommand;
+
 typedef enum {
     AST_COMMAND_ASSIGNMENT,
+    AST_COMMAND_READ,
     AST_COMMAND_WRITE,
     AST_COMMAND_WRITELN,
     AST_COMMAND_IF,
@@ -108,6 +115,7 @@ struct ASTCommand {
     ASTCommandType type;
     union {
         ASTAssignmentCommand assignment;
+        ASTReadCommand read;
         ASTWriteCommand write;
         ASTIfCommand if_command;
         ASTWhileCommand while_command;

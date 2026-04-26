@@ -186,7 +186,10 @@ static ASTExpression *parse_expression(Parser *parser, CompilerError *error);
 static bool parse_command(Parser *parser, ASTCommand *command, CompilerError *error);
 
 static bool parser_command_requires_semicolon(ASTCommandType type) {
-    return type == AST_COMMAND_ASSIGNMENT || type == AST_COMMAND_WRITE || type == AST_COMMAND_WRITELN;
+    return type == AST_COMMAND_ASSIGNMENT ||
+           type == AST_COMMAND_READ ||
+           type == AST_COMMAND_WRITE ||
+           type == AST_COMMAND_WRITELN;
 }
 
 static bool parser_is_terminator(const Parser *parser, const TokenType *terminators, size_t terminator_count) {
@@ -532,6 +535,25 @@ static bool parse_command(Parser *parser, ASTCommand *command, CompilerError *er
             return false;
         }
 
+        return true;
+    }
+
+    if (parser_match(parser, TOK_LEIA)) {
+        const Token *name_token;
+
+        command->type = AST_COMMAND_READ;
+        if (!parser_expect(parser, TOK_ID, error, "Esperado identificador apos 'leia'.")) {
+            return false;
+        }
+
+        name_token = parser_previous(parser);
+        command->read.name = parser_strdup(name_token->lexeme);
+        if (command->read.name == NULL) {
+            return parser_oom(parser, error);
+        }
+
+        command->read.line = name_token->line;
+        command->read.column = name_token->column;
         return true;
     }
 

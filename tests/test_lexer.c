@@ -125,6 +125,22 @@ void test_lexer_resets_initialized_output_tokens_before_each_scan(void) {
     token_list_free(&tokens);
 }
 
+void test_lexer_scans_leia_statement(void) {
+    const char *source = "leia valor;";
+    TokenList tokens;
+    CompilerError error = {0};
+
+    token_list_init(&tokens);
+    TEST_ASSERT_TRUE(lexer_scan(source, &tokens, &error));
+    TEST_ASSERT_EQUAL_size_t(4, tokens.count);
+    assert_token(&tokens, 0, TOK_LEIA, "leia", 1, 1);
+    assert_token(&tokens, 1, TOK_ID, "valor", 1, 6);
+    assert_token(&tokens, 2, TOK_PONTO_VIRGULA, ";", 1, 11);
+    assert_token(&tokens, 3, TOK_EOF, "", 1, 12);
+
+    token_list_free(&tokens);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_lexer_scans_program_structure_into_expected_tokens);
@@ -133,5 +149,6 @@ int main(void) {
     RUN_TEST(test_lexer_reports_invalid_character_with_line_information);
     RUN_TEST(test_lexer_accepts_zero_initialized_token_list);
     RUN_TEST(test_lexer_resets_initialized_output_tokens_before_each_scan);
+    RUN_TEST(test_lexer_scans_leia_statement);
     return UNITY_END();
 }

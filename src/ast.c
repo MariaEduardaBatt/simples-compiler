@@ -46,6 +46,9 @@ void ast_command_free(ASTCommand *command) {
             free(command->assignment.name);
             ast_expression_free(command->assignment.expression);
             break;
+        case AST_COMMAND_READ:
+            free(command->read.name);
+            break;
         case AST_COMMAND_WRITE:
         case AST_COMMAND_WRITELN:
             ast_expression_free(command->write.expression);

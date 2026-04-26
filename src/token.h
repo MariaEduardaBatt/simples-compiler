@@ -9,6 +9,7 @@ typedef enum {
     TOK_INICIO,
     TOK_FIM,
     TOK_INTEIRO,
+    TOK_LEIA,
     TOK_SE,
     TOK_ENTAO,
     TOK_SENAO,

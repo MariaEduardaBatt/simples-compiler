@@ -35,6 +35,8 @@ const char *token_type_name(TokenType type) {
             return "TOK_ESCREVA";
         case TOK_ESCREVAL:
             return "TOK_ESCREVAL";
+        case TOK_LEIA:
+            return "TOK_LEIA";
         case TOK_DIV:
             return "TOK_DIV";
         case TOK_SE:

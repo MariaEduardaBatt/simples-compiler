@@ -79,7 +79,7 @@ void test_codegen_emits_program_sections_and_helper_bodies_in_stable_order(void)
 
     assert_contains_in_order(assembly, "global _start\n\nsection .data\n", "x dd 0\n");
     assert_contains_in_order(
-        assembly, "x dd 0\n", "newline db 10\nprint_buffer times 12 db 0\n\nsection .text\n_start:\n");
+        assembly, "x dd 0\n", "newline db 10\nprint_buffer times 12 db 0\nread_buffer times 16 db 0\n\nsection .text\n_start:\n");
     assert_contains_in_order(assembly, "section .text\n_start:\n", "    mov eax, 1\n    xor ebx, ebx\n    int 0x80\n");
     assert_contains_in_order(assembly, "    int 0x80\n", "\nprint_int:\n");
     assert_contains_in_order(assembly, "\nprint_int:\n", "\nprint_newline:\n");
@@ -222,6 +222,103 @@ void test_codegen_escapes_user_identifiers_that_collide_with_for_temporaries(voi
     free(assembly);
 }
 
+void test_codegen_emits_read_call_and_store_for_leia(void) {
+    char *assembly = generate_source("programa demo inteiro x; inicio leia x; fim");
+
+    assert_contains(assembly, "call read_int");
+    assert_contains(assembly, "mov dword [x], eax");
+
+    free(assembly);
+}
+
+void test_codegen_emits_read_buffer_and_helper_body(void) {
+    char *assembly = generate_source("programa demo inteiro x; inicio leia x; escreval x; fim");
+
+    assert_contains(assembly, "read_buffer times 16 db 0");
+    assert_contains(assembly, "\nread_int:\n");
+    assert_contains(assembly, "mov eax, 3");
+    assert_contains(assembly, "mov ebx, 0");
+
+    free(assembly);
+}
+
+void test_codegen_read_int_validates_digit_characters(void) {
+    char *assembly = generate_source("programa demo inteiro x; inicio leia x; fim");
+
+    assert_contains_in_order(assembly, "    cmp al, '0'\n    jb .read_int_done\n", "    cmp al, '9'\n    ja .read_int_done\n");
+    assert_contains_in_order(assembly, "    cmp al, '9'\n    ja .read_int_done\n", "    sub al, '0'\n");
+
+    free(assembly);
+}
+
+void test_codegen_read_int_bounds_loop_to_bytes_read(void) {
+    char *assembly = generate_source("programa demo inteiro x; inicio leia x; fim");
+
+    assert_contains(assembly, "    lea edx, [read_buffer + eax]\n");
+    assert_contains_in_order(assembly, ".read_int_digits:\n", "    cmp ecx, edx\n    jae .read_int_done\n");
+
+    free(assembly);
+}
+
+void test_codegen_read_int_clamps_on_overflow(void) {
+    char *assembly = generate_source("programa demo inteiro x; inicio leia x; fim");
+
+    /* threshold check: accumulator vs 214748364 before multiply */
+    assert_contains_in_order(assembly,
+        "    sub al, '0'\n",
+        "    cmp edi, 214748364\n"
+        "    jg .read_int_overflow\n"
+        "    jl .read_int_no_overflow\n");
+
+    /* digit-level threshold: positive limit = 7, negative limit = 8 */
+    assert_contains_in_order(assembly,
+        "    jl .read_int_no_overflow\n",
+        "    cmp esi, 0\n"
+        "    je .read_int_check_pos_digit\n"
+        "    cmp al, 8\n"
+        "    jg .read_int_overflow\n"
+        "    jmp .read_int_no_overflow\n"
+        ".read_int_check_pos_digit:\n"
+        "    cmp al, 7\n"
+        "    jg .read_int_overflow\n");
+
+    /* post-accumulation signed-overflow guard: catches 0x80000000 wrap */
+    assert_contains(assembly,
+        ".read_int_no_overflow:\n"
+        "    imul edi, edi, 10\n"
+        "    add edi, eax\n"
+        "    js .read_int_limit_hit\n"
+        "    inc ecx\n"
+        "    jmp .read_int_digits\n"
+        ".read_int_limit_hit:\n"
+        "    inc ecx\n");
+
+    /* overflow drain loop: consume remaining digits then clamp */
+    assert_contains(assembly,
+        ".read_int_limit_hit:\n"
+        "    inc ecx\n"
+        ".read_int_overflow:\n"
+        "    cmp ecx, edx\n"
+        "    jae .read_int_overflow_ret\n"
+        "    movzx eax, byte [ecx]\n"
+        "    cmp al, '0'\n"
+        "    jb .read_int_overflow_ret\n"
+        "    cmp al, '9'\n"
+        "    ja .read_int_overflow_ret\n"
+        "    inc ecx\n"
+        "    jmp .read_int_overflow\n"
+        ".read_int_overflow_ret:\n"
+        "    cmp esi, 0\n"
+        "    je .read_int_clamp_pos\n"
+        "    mov eax, 0x80000000\n"
+        "    ret\n"
+        ".read_int_clamp_pos:\n"
+        "    mov eax, 0x7fffffff\n"
+        "    ret\n");
+
+    free(assembly);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_codegen_emits_direct_store_for_integer_assignment);
@@ -240,5 +337,10 @@ int main(void) {
     RUN_TEST(test_codegen_skips_for_body_when_step_is_zero);
     RUN_TEST(test_codegen_uses_negative_step_bound_check_for_for_loop);
     RUN_TEST(test_codegen_escapes_user_identifiers_that_collide_with_for_temporaries);
+    RUN_TEST(test_codegen_emits_read_call_and_store_for_leia);
+    RUN_TEST(test_codegen_emits_read_buffer_and_helper_body);
+    RUN_TEST(test_codegen_read_int_validates_digit_characters);
+    RUN_TEST(test_codegen_read_int_bounds_loop_to_bytes_read);
+    RUN_TEST(test_codegen_read_int_clamps_on_overflow);
     return UNITY_END();
 }
