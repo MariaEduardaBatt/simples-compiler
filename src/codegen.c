@@ -1,4 +1,5 @@
 #include "codegen.h"
+#include "error.h"
 
 #include <stdarg.h>
 #include <stdbool.h>
@@ -22,6 +23,12 @@ typedef struct {
     StringBuilder *builder;
     const SizeList *for_loop_ids;
     size_t next_label_id;
+    /* procedure context (NULL when generating main program) */
+    const char *current_proc_name;
+    const ASTParameter *parameters;
+    size_t parameter_count;
+    const ASTDeclaration *proc_locals;
+    size_t proc_local_count;
 } CodegenContext;
 
 static bool builder_reserve(StringBuilder *builder, size_t extra_length) {
@@ -166,6 +173,77 @@ static bool builder_append_store_int_to_identifier(
            builder_appendf(builder, "], %d\n", value);
 }
 
+/* Context-aware identifier access: checks procedure params/locals before globals. */
+
+static bool generate_load_name(CodegenContext *context, const char *name) {
+    size_t i;
+
+    if (context->parameters != NULL) {
+        for (i = 0; i < context->parameter_count; i++) {
+            if (strcmp(context->parameters[i].name, name) == 0) {
+                return builder_appendf(context->builder, "    mov eax, dword [ebp+%zu]\n", 8 + i * 4);
+            }
+        }
+    }
+
+    if (context->proc_locals != NULL) {
+        for (i = 0; i < context->proc_local_count; i++) {
+            if (strcmp(context->proc_locals[i].name, name) == 0) {
+                return builder_appendf(context->builder, "    mov eax, dword [ebp-%zu]\n", 4 + i * 4);
+            }
+        }
+    }
+
+    return builder_append_load_identifier(context->builder, context->for_loop_ids, name);
+}
+
+static bool generate_store_eax_to_name(CodegenContext *context, const char *name) {
+    size_t i;
+
+    if (context->parameters != NULL) {
+        for (i = 0; i < context->parameter_count; i++) {
+            if (strcmp(context->parameters[i].name, name) == 0) {
+                return builder_appendf(context->builder, "    mov dword [ebp+%zu], eax\n", 8 + i * 4);
+            }
+        }
+    }
+
+    if (context->proc_locals != NULL) {
+        for (i = 0; i < context->proc_local_count; i++) {
+            if (strcmp(context->proc_locals[i].name, name) == 0) {
+                return builder_appendf(context->builder, "    mov dword [ebp-%zu], eax\n", 4 + i * 4);
+            }
+        }
+    }
+
+    return builder_append_store_eax_to_identifier(context->builder, context->for_loop_ids, name);
+}
+
+static bool generate_store_int_to_name(CodegenContext *context, const char *name, int value) {
+    size_t i;
+
+    if (context->parameters != NULL) {
+        for (i = 0; i < context->parameter_count; i++) {
+            if (strcmp(context->parameters[i].name, name) == 0) {
+                return builder_appendf(context->builder, "    mov dword [ebp+%zu], %d\n", 8 + i * 4, value);
+            }
+        }
+    }
+
+    if (context->proc_locals != NULL) {
+        for (i = 0; i < context->proc_local_count; i++) {
+            if (strcmp(context->proc_locals[i].name, name) == 0) {
+                return builder_appendf(context->builder, "    mov dword [ebp-%zu], %d\n", 4 + i * 4, value);
+            }
+        }
+    }
+
+    return builder_append_store_int_to_identifier(context->builder, context->for_loop_ids, name, value);
+}
+
+/* Push an expression result onto the stack; optimise integer literals to push <N>. */
+static bool generate_push_expression(CodegenContext *context, const ASTExpression *expression);
+
 static const char *symbol_name_at(const ASTProgram *program, const SymbolTable *symbols, size_t index) {
     if (symbols != NULL && symbols->names != NULL && index < symbols->count) {
         const char *name = symbols->names[index];
@@ -211,6 +289,9 @@ static bool builder_append_booleanize(StringBuilder *builder, const char *regist
 }
 
 static bool collect_for_loop_ids_in_block(SizeList *for_loop_ids, size_t *next_label_id, const ASTCommand *commands, size_t command_count);
+static bool procedure_supports_integer_backend(const ASTProcedure *procedure, CompilerError *error);
+static bool collect_for_loop_ids_in_program(
+    SizeList *for_loop_ids, size_t *next_label_id, const ASTProgram *program);
 
 static bool collect_for_loop_ids_in_command(SizeList *for_loop_ids, size_t *next_label_id, const ASTCommand *command) {
     size_t label_id;
@@ -255,6 +336,181 @@ static bool collect_for_loop_ids_in_block(SizeList *for_loop_ids, size_t *next_l
     return true;
 }
 
+static bool collect_for_loop_ids_in_program(
+    SizeList *for_loop_ids, size_t *next_label_id, const ASTProgram *program) {
+    size_t index;
+
+    if (program == NULL) {
+        return false;
+    }
+
+    if (!collect_for_loop_ids_in_block(for_loop_ids, next_label_id, program->commands, program->command_count)) {
+        return false;
+    }
+
+    for (index = 0; index < program->procedure_count; ++index) {
+        if (!collect_for_loop_ids_in_block(
+                for_loop_ids, next_label_id, program->procedures[index].commands, program->procedures[index].command_count)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool fail_float_procedure_codegen(CompilerError *error, int line, int column) {
+    compiler_error_set(
+        error,
+        COMPILER_PHASE_CODEGEN,
+        line,
+        column,
+        "Code generation for flutuante procedures is not supported yet.");
+    return false;
+}
+
+static bool procedure_expression_supports_integer_backend(const ASTExpression *expression, CompilerError *error) {
+    size_t index;
+
+    if (expression == NULL) {
+        return true;
+    }
+
+    switch (expression->type) {
+        case AST_EXPR_INT:
+        case AST_EXPR_IDENTIFIER:
+            return true;
+        case AST_EXPR_FLOAT:
+            return fail_float_procedure_codegen(error, expression->line, expression->column);
+        case AST_EXPR_CALL:
+            for (index = 0; index < expression->call.argument_count; ++index) {
+                if (!procedure_expression_supports_integer_backend(expression->call.arguments[index], error)) {
+                    return false;
+                }
+            }
+            return true;
+        case AST_EXPR_UNARY:
+            return procedure_expression_supports_integer_backend(expression->unary.operand, error);
+        case AST_EXPR_BINARY:
+            return procedure_expression_supports_integer_backend(expression->binary.left, error) &&
+                   procedure_expression_supports_integer_backend(expression->binary.right, error);
+        default:
+            compiler_error_set(
+                error,
+                COMPILER_PHASE_CODEGEN,
+                expression->line,
+                expression->column,
+                "Internal error: unsupported expression type in procedure backend check.");
+            return false;
+    }
+}
+
+static bool procedure_command_supports_integer_backend(const ASTCommand *command, CompilerError *error) {
+    size_t index;
+
+    if (command == NULL) {
+        return true;
+    }
+
+    switch (command->type) {
+        case AST_COMMAND_ASSIGNMENT:
+            return procedure_expression_supports_integer_backend(command->assignment.expression, error);
+        case AST_COMMAND_READ:
+            return true;
+        case AST_COMMAND_WRITE:
+        case AST_COMMAND_WRITELN:
+            return procedure_expression_supports_integer_backend(command->write.expression, error);
+        case AST_COMMAND_CALL:
+            for (index = 0; index < command->call_command.call.argument_count; ++index) {
+                if (!procedure_expression_supports_integer_backend(command->call_command.call.arguments[index], error)) {
+                    return false;
+                }
+            }
+            return true;
+        case AST_COMMAND_RETURN:
+            return procedure_expression_supports_integer_backend(command->return_command.expression, error);
+        case AST_COMMAND_IF:
+            if (!procedure_expression_supports_integer_backend(command->if_command.condition, error)) {
+                return false;
+            }
+            for (index = 0; index < command->if_command.then_count; ++index) {
+                if (!procedure_command_supports_integer_backend(&command->if_command.then_commands[index], error)) {
+                    return false;
+                }
+            }
+            for (index = 0; index < command->if_command.else_count; ++index) {
+                if (!procedure_command_supports_integer_backend(&command->if_command.else_commands[index], error)) {
+                    return false;
+                }
+            }
+            return true;
+        case AST_COMMAND_WHILE:
+            if (!procedure_expression_supports_integer_backend(command->while_command.condition, error)) {
+                return false;
+            }
+            for (index = 0; index < command->while_command.body_count; ++index) {
+                if (!procedure_command_supports_integer_backend(&command->while_command.body_commands[index], error)) {
+                    return false;
+                }
+            }
+            return true;
+        case AST_COMMAND_FOR:
+            if (!procedure_expression_supports_integer_backend(command->for_command.start_expression, error) ||
+                !procedure_expression_supports_integer_backend(command->for_command.end_expression, error) ||
+                !procedure_expression_supports_integer_backend(command->for_command.step_expression, error)) {
+                return false;
+            }
+            for (index = 0; index < command->for_command.body_count; ++index) {
+                if (!procedure_command_supports_integer_backend(&command->for_command.body_commands[index], error)) {
+                    return false;
+                }
+            }
+            return true;
+        default:
+            compiler_error_set(
+                error,
+                COMPILER_PHASE_CODEGEN,
+                0,
+                0,
+                "Internal error: unsupported command type in procedure backend check.");
+            return false;
+    }
+}
+
+static bool procedure_supports_integer_backend(const ASTProcedure *procedure, CompilerError *error) {
+    size_t index;
+
+    if (procedure == NULL) {
+        return false;
+    }
+
+    if (procedure->return_type == AST_TYPE_FLUTUANTE) {
+        return fail_float_procedure_codegen(error, procedure->line, procedure->column);
+    }
+
+    for (index = 0; index < procedure->parameter_count; ++index) {
+        if (procedure->parameters[index].type == AST_TYPE_FLUTUANTE) {
+            return fail_float_procedure_codegen(error, procedure->parameters[index].line, procedure->parameters[index].column);
+        }
+    }
+
+    for (index = 0; index < procedure->local_declaration_count; ++index) {
+        if (procedure->local_declarations[index].type == AST_TYPE_FLUTUANTE) {
+            return fail_float_procedure_codegen(
+                error,
+                procedure->local_declarations[index].line,
+                procedure->local_declarations[index].column);
+        }
+    }
+
+    for (index = 0; index < procedure->command_count; ++index) {
+        if (!procedure_command_supports_integer_backend(&procedure->commands[index], error)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 static bool generate_expression(CodegenContext *context, const ASTExpression *expression) {
     StringBuilder *builder = context->builder;
 
@@ -266,7 +522,27 @@ static bool generate_expression(CodegenContext *context, const ASTExpression *ex
         case AST_EXPR_INT:
             return builder_appendf(builder, "    mov eax, %d\n", expression->int_value);
         case AST_EXPR_IDENTIFIER:
-            return builder_append_load_identifier(builder, context->for_loop_ids, expression->identifier);
+            return generate_load_name(context, expression->identifier);
+        case AST_EXPR_CALL: {
+            const ASTCall *call = &expression->call;
+            size_t arg_i;
+
+            for (arg_i = call->argument_count; arg_i > 0; arg_i--) {
+                if (!generate_push_expression(context, call->arguments[arg_i - 1])) {
+                    return false;
+                }
+            }
+
+            if (!builder_appendf(builder, "    call proc_%s\n", call->name)) {
+                return false;
+            }
+
+            if (call->argument_count > 0) {
+                return builder_appendf(builder, "    add esp, %zu\n", call->argument_count * 4);
+            }
+
+            return true;
+        }
         case AST_EXPR_UNARY:
             if (!generate_expression(context, expression->unary.operand)) {
                 return false;
@@ -334,18 +610,15 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command)
     switch (command->type) {
         case AST_COMMAND_ASSIGNMENT:
             if (command->assignment.expression != NULL && command->assignment.expression->type == AST_EXPR_INT) {
-                return builder_append_store_int_to_identifier(
-                    builder,
-                    context->for_loop_ids,
-                    command->assignment.name,
-                    command->assignment.expression->int_value);
+                return generate_store_int_to_name(context, command->assignment.name,
+                                                  command->assignment.expression->int_value);
             }
 
             return generate_expression(context, command->assignment.expression) &&
-                   builder_append_store_eax_to_identifier(builder, context->for_loop_ids, command->assignment.name);
+                   generate_store_eax_to_name(context, command->assignment.name);
         case AST_COMMAND_READ:
             return builder_append(builder, "    call read_int\n") &&
-                   builder_append_store_eax_to_identifier(builder, context->for_loop_ids, command->read.name);
+                   generate_store_eax_to_name(context, command->read.name);
         case AST_COMMAND_WRITE:
             return generate_expression(context, command->write.expression) &&
                    builder_append(builder, "    call print_int\n");
@@ -353,9 +626,37 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command)
             return generate_expression(context, command->write.expression) &&
                    builder_append(builder, "    call print_int\n") &&
                    builder_append(builder, "    call print_newline\n");
-        case AST_COMMAND_CALL:
+        case AST_COMMAND_CALL: {
+            const ASTCall *call = &command->call_command.call;
+            size_t arg_i;
+
+            for (arg_i = call->argument_count; arg_i > 0; arg_i--) {
+                if (!generate_push_expression(context, call->arguments[arg_i - 1])) {
+                    return false;
+                }
+            }
+
+            if (!builder_appendf(builder, "    call proc_%s\n", call->name)) {
+                return false;
+            }
+
+            if (call->argument_count > 0) {
+                return builder_appendf(builder, "    add esp, %zu\n", call->argument_count * 4);
+            }
+
+            return true;
+        }
         case AST_COMMAND_RETURN:
-            return false;
+            if (context->current_proc_name == NULL) {
+                return false;
+            }
+
+            if (command->return_command.expression != NULL &&
+                !generate_expression(context, command->return_command.expression)) {
+                return false;
+            }
+
+            return builder_appendf(builder, "    jmp .proc_%s_epilogue\n", context->current_proc_name);
         case AST_COMMAND_IF: {
             size_t label_id = context->next_label_id++;
 
@@ -392,7 +693,7 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command)
             size_t label_id = context->next_label_id++;
 
             return generate_expression(context, command->for_command.start_expression) &&
-                   builder_append_store_eax_to_identifier(builder, context->for_loop_ids, command->for_command.iterator_name) &&
+                   generate_store_eax_to_name(context, command->for_command.iterator_name) &&
                    generate_expression(context, command->for_command.end_expression) &&
                    builder_appendf(builder, "    mov dword [_for_end_%zu], eax\n", label_id) &&
                    generate_expression(context, command->for_command.step_expression) &&
@@ -402,22 +703,22 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command)
                    builder_append(builder, "    cmp eax, 0\n") &&
                    builder_appendf(builder, "    je .Lendfor%zu\n", label_id) &&
                    builder_appendf(builder, "    jg .Lforpos%zu\n", label_id) &&
-                   builder_append_load_identifier(builder, context->for_loop_ids, command->for_command.iterator_name) &&
+                   generate_load_name(context, command->for_command.iterator_name) &&
                    builder_appendf(builder, "    mov ebx, dword [_for_end_%zu]\n", label_id) &&
                    builder_append(builder, "    cmp eax, ebx\n") &&
                    builder_appendf(builder, "    jl .Lendfor%zu\n", label_id) &&
                    builder_appendf(builder, "    jmp .Lforbody%zu\n", label_id) &&
                    builder_appendf(builder, ".Lforpos%zu:\n", label_id) &&
-                   builder_append_load_identifier(builder, context->for_loop_ids, command->for_command.iterator_name) &&
+                   generate_load_name(context, command->for_command.iterator_name) &&
                    builder_appendf(builder, "    mov ebx, dword [_for_end_%zu]\n", label_id) &&
                    builder_append(builder, "    cmp eax, ebx\n") &&
                    builder_appendf(builder, "    jg .Lendfor%zu\n", label_id) &&
                    builder_appendf(builder, ".Lforbody%zu:\n", label_id) &&
                    generate_command_block(context, command->for_command.body_commands, command->for_command.body_count) &&
-                   builder_append_load_identifier(builder, context->for_loop_ids, command->for_command.iterator_name) &&
+                   generate_load_name(context, command->for_command.iterator_name) &&
                    builder_appendf(builder, "    mov ebx, dword [_for_step_%zu]\n", label_id) &&
                    builder_append(builder, "    add eax, ebx\n") &&
-                   builder_append_store_eax_to_identifier(builder, context->for_loop_ids, command->for_command.iterator_name) &&
+                   generate_store_eax_to_name(context, command->for_command.iterator_name) &&
                    builder_appendf(builder, "    jmp .Lfor%zu\n", label_id) &&
                    builder_appendf(builder, ".Lendfor%zu:\n", label_id);
         }
@@ -433,6 +734,55 @@ static bool generate_command_block(CodegenContext *context, const ASTCommand *co
         if (!generate_command(context, &commands[index])) {
             return false;
         }
+    }
+
+    return true;
+}
+
+static bool generate_push_expression(CodegenContext *context, const ASTExpression *expression) {
+    if (expression->type == AST_EXPR_INT) {
+        return builder_appendf(context->builder, "    push %d\n", expression->int_value);
+    }
+
+    return generate_expression(context, expression) &&
+           builder_append(context->builder, "    push eax\n");
+}
+
+static bool generate_procedure(
+    const ASTProcedure *proc, StringBuilder *builder, const SizeList *for_loop_ids, size_t *next_label_id) {
+    CodegenContext context;
+
+    if (!builder_appendf(builder, "\nproc_%s:\n", proc->name) ||
+        !builder_append(builder, "    push ebp\n    mov ebp, esp\n")) {
+        return false;
+    }
+
+    if (proc->local_declaration_count > 0) {
+        if (!builder_appendf(builder, "    sub esp, %zu\n", proc->local_declaration_count * 4)) {
+            return false;
+        }
+    }
+
+    context.builder = builder;
+    context.for_loop_ids = for_loop_ids;
+    context.next_label_id = next_label_id != NULL ? *next_label_id : 0;
+    context.current_proc_name = proc->name;
+    context.parameters = proc->parameters;
+    context.parameter_count = proc->parameter_count;
+    context.proc_locals = proc->local_declarations;
+    context.proc_local_count = proc->local_declaration_count;
+
+    if (!generate_command_block(&context, proc->commands, proc->command_count)) {
+        return false;
+    }
+
+    if (next_label_id != NULL) {
+        *next_label_id = context.next_label_id;
+    }
+
+    if (!builder_appendf(builder, ".proc_%s_epilogue:\n", proc->name) ||
+        !builder_append(builder, "    mov esp, ebp\n    pop ebp\n    ret\n")) {
+        return false;
     }
 
     return true;
@@ -561,68 +911,104 @@ static bool generate_helpers(StringBuilder *builder) {
                "    ret\n");
 }
 
-char *codegen_generate_program(const ASTProgram *program, const SymbolTable *symbols) {
+bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *semantic, char **out_assembly, CompilerError *error) {
     StringBuilder builder = {0};
     SizeList for_loop_ids = {0};
-    CodegenContext context = {.builder = &builder, .for_loop_ids = &for_loop_ids, .next_label_id = 0};
+    CodegenContext context;
+    const SymbolTable *symbols;
     size_t index;
     size_t next_label_id = 0;
 
-    if (program == NULL) {
-        return NULL;
+    if (out_assembly != NULL) {
+        *out_assembly = NULL;
     }
 
-    if (!collect_for_loop_ids_in_block(&for_loop_ids, &next_label_id, program->commands, program->command_count)) {
+    if (program == NULL) {
+        return false;
+    }
+
+    symbols = (semantic != NULL) ? &semantic->globals : NULL;
+
+    /* Pre-check: reject any flutuante procedure before emitting anything. */
+    for (index = 0; index < program->procedure_count; index++) {
+        const ASTProcedure *proc = &program->procedures[index];
+
+        if (!procedure_supports_integer_backend(proc, error)) {
+            return false;
+        }
+    }
+
+    if (!collect_for_loop_ids_in_program(&for_loop_ids, &next_label_id, program)) {
         free(for_loop_ids.items);
-        return NULL;
+        return false;
     }
 
     if (!builder_append(&builder, "global _start\n\nsection .data\n")) {
-        free(for_loop_ids.items);
-        free(builder.data);
-        return NULL;
+        goto fail;
     }
 
     for (index = 0; index < symbol_count(program, symbols); ++index) {
         const char *name = symbol_name_at(program, symbols, index);
 
         if (name == NULL || !builder_append_user_symbol_declaration(&builder, &for_loop_ids, name)) {
-            free(for_loop_ids.items);
-            free(builder.data);
-            return NULL;
+            goto fail;
         }
     }
 
     for (index = 0; index < for_loop_ids.count; ++index) {
         size_t label_id = for_loop_ids.items[index];
 
+        /*
+         * These temporaries live in .data, so procedure for-loops are not re-entrant.
+         * A recursive procedure that executes a for-loop will overwrite its own bounds.
+         */
         if (!builder_appendf(&builder, "_for_end_%zu dd 0\n", label_id) ||
             !builder_appendf(&builder, "_for_step_%zu dd 0\n", label_id)) {
-            free(for_loop_ids.items);
-            free(builder.data);
-            return NULL;
+            goto fail;
         }
     }
 
     if (!builder_append(&builder, "newline db 10\nprint_buffer times 12 db 0\nread_buffer times 16 db 0\n\nsection .text\n_start:\n")) {
-        free(for_loop_ids.items);
-        free(builder.data);
-        return NULL;
+        goto fail;
     }
+
+    context.builder = &builder;
+    context.for_loop_ids = &for_loop_ids;
+    context.next_label_id = 0;
+    context.current_proc_name = NULL;
+    context.parameters = NULL;
+    context.parameter_count = 0;
+    context.proc_locals = NULL;
+    context.proc_local_count = 0;
 
     if (!generate_command_block(&context, program->commands, program->command_count)) {
-        free(for_loop_ids.items);
-        free(builder.data);
-        return NULL;
+        goto fail;
     }
 
-    if (!builder_append(&builder, "    mov eax, 1\n    xor ebx, ebx\n    int 0x80\n") ||
-        !generate_helpers(&builder)) {
-        free(for_loop_ids.items);
-        free(builder.data);
-        return NULL;
+    if (!builder_append(&builder, "    mov eax, 1\n    xor ebx, ebx\n    int 0x80\n")) {
+        goto fail;
+    }
+
+    for (index = 0; index < program->procedure_count; index++) {
+        if (!generate_procedure(&program->procedures[index], &builder, &for_loop_ids, &context.next_label_id)) {
+            goto fail;
+        }
+    }
+
+    if (!generate_helpers(&builder)) {
+        goto fail;
     }
 
     free(for_loop_ids.items);
-    return builder.data;
+    if (out_assembly != NULL) {
+        *out_assembly = builder.data;
+    } else {
+        free(builder.data);
+    }
+    return true;
+
+fail:
+    free(for_loop_ids.items);
+    free(builder.data);
+    return false;
 }

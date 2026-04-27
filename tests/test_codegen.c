@@ -40,8 +40,46 @@ static char *generate_source(const char *source) {
     TEST_ASSERT_NOT_NULL(program);
     TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
 
-    assembly = codegen_generate_program(program, &info.globals);
+    TEST_ASSERT_TRUE(codegen_generate_program(program, &info, &assembly, &error));
     TEST_ASSERT_NOT_NULL(assembly);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+    return assembly;
+}
+
+static char *generate_source_with_error(const char *source, CompilerError *out_error) {
+    CompilerError error = {0};
+    TokenList tokens;
+    ASTProgram *program = NULL;
+    SemanticInfo info = {0};
+    char *assembly = NULL;
+
+    token_list_init(&tokens);
+    if (!lexer_scan(source, &tokens, &error)) {
+        if (out_error != NULL) { *out_error = error; }
+        token_list_free(&tokens);
+        return NULL;
+    }
+    if (!parse_program(&tokens, &program, &error)) {
+        if (out_error != NULL) { *out_error = error; }
+        ast_program_free(program);
+        token_list_free(&tokens);
+        return NULL;
+    }
+    if (!analyze_program(program, &info, &error)) {
+        if (out_error != NULL) { *out_error = error; }
+        semantic_info_free(&info);
+        ast_program_free(program);
+        token_list_free(&tokens);
+        return NULL;
+    }
+
+    if (!codegen_generate_program(program, &info, &assembly, &error)) {
+        if (out_error != NULL) { *out_error = error; }
+        assembly = NULL;
+    }
 
     semantic_info_free(&info);
     ast_program_free(program);
@@ -124,9 +162,11 @@ void test_codegen_uses_program_declarations_when_symbol_names_are_missing(void) 
     char name[] = "x";
     ASTDeclaration declaration = {.name = name, .line = 1, .column = 1};
     ASTProgram program = {.name = "demo", .declarations = &declaration, .declaration_count = 1};
-    SymbolTable symbols = {.names = NULL, .count = 1};
-    char *assembly = codegen_generate_program(&program, &symbols);
+    SemanticInfo semantic = {.globals = {.names = NULL, .count = 1}};
+    char *assembly = NULL;
+    CompilerError error = {0};
 
+    TEST_ASSERT_TRUE(codegen_generate_program(&program, &semantic, &assembly, &error));
     TEST_ASSERT_NOT_NULL(assembly);
     assert_contains(assembly, "x dd 0");
 
@@ -135,9 +175,12 @@ void test_codegen_uses_program_declarations_when_symbol_names_are_missing(void) 
 
 void test_codegen_returns_null_when_symbol_fallback_has_no_declarations(void) {
     ASTProgram program = {.name = "demo", .declarations = NULL, .declaration_count = 1};
-    SymbolTable symbols = {.names = NULL, .count = 1};
+    SemanticInfo semantic = {.globals = {.names = NULL, .count = 1}};
+    char *assembly = NULL;
+    CompilerError error = {0};
 
-    TEST_ASSERT_NULL(codegen_generate_program(&program, &symbols));
+    TEST_ASSERT_FALSE(codegen_generate_program(&program, &semantic, &assembly, &error));
+    TEST_ASSERT_NULL(assembly);
 }
 
 void test_codegen_emits_labels_and_jump_for_if_else(void) {
@@ -319,6 +362,106 @@ void test_codegen_read_int_clamps_on_overflow(void) {
     free(assembly);
 }
 
+void test_codegen_emits_call_and_stack_cleanup_for_integer_procedure(void) {
+    char *assembly = generate_source(
+        "procedimento inteiro soma(inteiro a, inteiro b)\n"
+        "inicio\n"
+        "  retorna a + b;\n"
+        "fim\n"
+        "programa demo\n"
+        "inteiro x;\n"
+        "inicio\n"
+        "  x <- soma(1, 2);\n"
+        "fim");
+
+    assert_contains(assembly, "proc_soma:");
+    assert_contains(assembly, "push ebp\n    mov ebp, esp");
+    assert_contains(assembly, "mov eax, dword [ebp+8]");
+    assert_contains(assembly, "mov eax, dword [ebp+12]");
+    assert_contains(assembly, "push 2\n    push 1\n    call proc_soma\n    add esp, 8");
+    assert_contains(assembly, "mov esp, ebp\n    pop ebp\n    ret");
+    assert_contains(assembly, "mov dword [x], eax");
+    free(assembly);
+}
+
+void test_codegen_rejects_float_procedure_with_explicit_error(void) {
+    CompilerError error = {0};
+    char *assembly = generate_source_with_error(
+        "procedimento flutuante soma(flutuante a, flutuante b)\n"
+        "inicio\n"
+        "  retorna a;\n"
+        "fim\n"
+        "programa demo\n"
+        "inicio\n"
+        "  escreval 1;\n"
+        "fim",
+        &error);
+
+    TEST_ASSERT_NULL(assembly);
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Code generation for flutuante procedures is not supported yet.", error.message);
+}
+
+void test_codegen_rejects_float_local_in_procedure_with_explicit_error(void) {
+    CompilerError error = {0};
+    char *assembly = generate_source_with_error(
+        "procedimento vazio usa()\n"
+        "inicio\n"
+        "flutuante x;\n"
+        "  x <- 1.5;\n"
+        "  retorna;\n"
+        "fim\n"
+        "programa demo\n"
+        "inicio\n"
+        "  usa();\n"
+        "fim",
+        &error);
+
+    TEST_ASSERT_NULL(assembly);
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Code generation for flutuante procedures is not supported yet.", error.message);
+}
+
+void test_codegen_emits_void_procedure_return_without_expression(void) {
+    char *assembly = generate_source(
+        "procedimento vazio usa()\n"
+        "inicio\n"
+        "  escreval 1;\n"
+        "  retorna;\n"
+        "fim\n"
+        "programa demo\n"
+        "inicio\n"
+        "  usa();\n"
+        "fim");
+
+    assert_contains(assembly, "proc_usa:");
+    assert_contains(assembly, "call proc_usa");
+    assert_contains(assembly, "jmp .proc_usa_epilogue");
+    TEST_ASSERT_NULL(strstr(assembly, "add esp, 0"));
+    free(assembly);
+}
+
+void test_codegen_emits_for_loop_temporaries_for_procedure_body(void) {
+    char *assembly = generate_source(
+        "procedimento inteiro soma(inteiro a, inteiro b)\n"
+        "inicio\n"
+        "  inteiro i;\n"
+        "  para i de 0 ate 2 passo 1 faca escreva i; fimpara\n"
+        "  retorna a + b;\n"
+        "fim\n"
+        "programa demo\n"
+        "inteiro x;\n"
+        "inicio\n"
+        "  x <- soma(1, 2);\n"
+        "fim");
+
+    assert_contains(assembly, "_for_end_0 dd 0");
+    assert_contains(assembly, "_for_step_0 dd 0");
+    assert_contains(assembly, ".Lfor0:");
+    assert_contains(assembly, ".Lendfor0:");
+    free(assembly);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_codegen_emits_direct_store_for_integer_assignment);
@@ -342,5 +485,10 @@ int main(void) {
     RUN_TEST(test_codegen_read_int_validates_digit_characters);
     RUN_TEST(test_codegen_read_int_bounds_loop_to_bytes_read);
     RUN_TEST(test_codegen_read_int_clamps_on_overflow);
+    RUN_TEST(test_codegen_emits_call_and_stack_cleanup_for_integer_procedure);
+    RUN_TEST(test_codegen_rejects_float_procedure_with_explicit_error);
+    RUN_TEST(test_codegen_rejects_float_local_in_procedure_with_explicit_error);
+    RUN_TEST(test_codegen_emits_void_procedure_return_without_expression);
+    RUN_TEST(test_codegen_emits_for_loop_temporaries_for_procedure_body);
     return UNITY_END();
 }

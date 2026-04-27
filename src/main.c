@@ -99,6 +99,8 @@ static const char *phase_name(CompilerPhase phase) {
             return "parser";
         case COMPILER_PHASE_SEMANTIC:
             return "semantic";
+        case COMPILER_PHASE_CODEGEN:
+            return "codegen";
         default:
             return "compiler";
     }
@@ -139,9 +141,8 @@ int compile_file(const char *input_path, const char *output_path) {
         goto cleanup;
     }
 
-    assembly = codegen_generate_program(program, &semantic_info.globals);
-    if (assembly == NULL) {
-        fprintf(stderr, "codegen:1:1: Falha na geracao de codigo.\n");
+    if (!codegen_generate_program(program, &semantic_info, &assembly, &error)) {
+        exit_code = report_error(&error);
         goto cleanup;
     }
 
