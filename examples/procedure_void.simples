@@ -1,0 +1,10 @@
+procedimento vazio imprime_um()
+inicio
+  escreval 1;
+  retorna;
+fim
+
+programa demo
+inicio
+  imprime_um();
+fim

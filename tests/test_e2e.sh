@@ -198,4 +198,14 @@ output=$(printf '%s\n' '-21474836480' | "$e2e_dir/read")
 output=$(printf '%s\n' '-21474836489' | "$e2e_dir/read")
 [ "$output" = "-2147483648" ]
 
+"$compiler" examples/procedure_sum.simples "$e2e_dir/procedure_sum.asm"
+nasm -f elf32 "$e2e_dir/procedure_sum.asm" -o "$e2e_dir/procedure_sum.o"
+ld -m elf_i386 "$e2e_dir/procedure_sum.o" -o "$e2e_dir/procedure_sum"
+[ "$("$e2e_dir/procedure_sum")" = "5" ]
+
+"$compiler" examples/procedure_void.simples "$e2e_dir/procedure_void.asm"
+nasm -f elf32 "$e2e_dir/procedure_void.asm" -o "$e2e_dir/procedure_void.o"
+ld -m elf_i386 "$e2e_dir/procedure_void.o" -o "$e2e_dir/procedure_void"
+[ "$("$e2e_dir/procedure_void")" = "1" ]
+
 printf 'e2e ok\n'

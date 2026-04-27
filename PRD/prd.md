@@ -120,10 +120,19 @@ ld -m elf_i386 programa.o -o programa
 ### Gramática EBNF completa
 
 ```
-<programa>        ::= "programa" ID <declaracoes> "inicio" <comandos> "fim"
+<arquivo>         ::= { <procedimento> } <programa>
 
-<declaracoes>     ::= { <declaracao> }
-<declaracao>      ::= <tipo> ID { "," ID }
+<programa>        ::= "programa" ID <declaracoes_globais> "inicio" <comandos> "fim"
+
+<procedimento>    ::= "procedimento" <tipo_retorno> ID "(" [ <parametros> ] ")"
+                      "inicio" <declaracoes_locais> <comandos> "fim"
+<parametros>      ::= <parametro> { "," <parametro> }
+<parametro>       ::= <tipo> ID
+<tipo_retorno>    ::= "inteiro" | "flutuante" | "vazio"
+
+<declaracoes_globais> ::= { <declaracao> }
+<declaracoes_locais>  ::= { <declaracao> }
+<declaracao>      ::= <tipo> ID { "," ID } ";"
 <tipo>            ::= "inteiro" | "flutuante"
 
 <comandos>        ::= { <comando> }
@@ -133,10 +142,15 @@ ld -m elf_i386 programa.o -o programa
                     | <cmd_se>
                     | <cmd_enquanto>
                     | <cmd_para>
+                    | <cmd_chamada>
+                    | <cmd_retorna>
 
-<atribuicao>      ::= ID "<-" <expressao>
-<cmd_leia>        ::= "leia" ID
-<cmd_escreva>     ::= ("escreva" | "escreval") <expressao>
+<atribuicao>      ::= ID "<-" <expressao> ";"
+<cmd_leia>        ::= "leia" ID ";"
+<cmd_escreva>     ::= ("escreva" | "escreval") <expressao> ";"
+<cmd_chamada>     ::= ID "(" [ <argumentos> ] ")" ";"
+<cmd_retorna>     ::= "retorna" [ <expressao> ] ";"
+<argumentos>      ::= <expressao> { "," <expressao> }
 
 <cmd_se>          ::= "se" <expressao> "entao" <comandos>
                       [ "senao" <comandos> ] "fimse"
@@ -153,6 +167,7 @@ ld -m elf_i386 programa.o -o programa
 <expr_aditiva>    ::= <expr_mult> { ("+" | "-") <expr_mult> }
 <expr_mult>       ::= <fator> { ("*" | "div") <fator> }
 <fator>           ::= ID | NUM_INT | NUM_FLOAT
+                    | ID "(" [ <argumentos> ] ")"
                     | "(" <expressao> ")"
                     | "nao" <fator>
                     | "-" <fator>
@@ -213,11 +228,11 @@ simples_compiler/
 
 ```
 programa teste
-  inteiro x, y, z
+  inteiro x, y, z;
 inicio
-  x <- 10
-  y <- 20
-  z <- x + y
+  x <- 10;
+  y <- 20;
+  z <- x + y;
 fim
 ```
 
@@ -258,10 +273,10 @@ _start:
 
 ```
 programa teste
-  inteiro x
+  inteiro x;
 inicio
-  leia x
-  escreva x
+  leia x;
+  escreva x;
 fim
 ```
 
@@ -337,13 +352,13 @@ _start:
 
 ```
 programa teste
-  inteiro x
+  inteiro x;
 inicio
-  x <- 10
+  x <- 10;
   se x > 5 entao
-    escreva x
+    escreva x;
   senao
-    escreva 0
+    escreva 0;
   fimse
 fim
 ```
@@ -417,12 +432,12 @@ _start:
 
 ```
 programa teste
-  inteiro x
+  inteiro x;
 inicio
-  x <- 1
+  x <- 1;
   enquanto x < 6 faca
-    escreva x
-    x <- x + 1
+    escreva x;
+    x <- x + 1;
   fimenquanto
 fim
 ```
@@ -468,10 +483,10 @@ _start:
 
 ```
 programa teste
-  inteiro i
+  inteiro i;
 inicio
   para i de 1 ate 5 passo 1 faca
-    escreva i
+    escreva i;
   fimpara
 fim
 ```
@@ -520,11 +535,11 @@ _start:
 
 ```
 programa teste
-  inteiro a, b, c
+  inteiro a, b, c;
 inicio
-  a <- 3
-  b <- 4
-  c <- a * b + 2
+  a <- 3;
+  b <- 4;
+  c <- a * b + 2;
 fim
 ```
 
@@ -563,16 +578,16 @@ _start:
 
 ```
 programa fatorial
-  inteiro n, fat, contador
+  inteiro n, fat, contador;
 inicio
-  leia n
-  fat <- 1
-  contador <- 1
+  leia n;
+  fat <- 1;
+  contador <- 1;
   enquanto contador < n faca
-    contador <- contador + 1
-    fat <- fat * contador
+    contador <- contador + 1;
+    fat <- fat * contador;
   fimenquanto
-  escreva fat
+  escreva fat;
 fim
 ```
 
@@ -629,6 +644,135 @@ _start:
     mov eax, 1
     xor ebx, ebx
     int 0x80
+```
+
+---
+
+### Exemplo 8 — Procedimento com retorno inteiro
+
+**Entrada (linguagem SIMPLES):**
+
+```
+procedimento inteiro soma(inteiro a, inteiro b)
+inicio
+  retorna a + b;
+fim
+
+programa demo
+inteiro x;
+inicio
+  x <- soma(2, 3);
+  escreval x;
+fim
+```
+
+**Saída (NASM 32-bit):**
+
+```nasm
+global _start
+
+section .data
+x dd 0
+newline db 10
+print_buffer times 12 db 0
+read_buffer times 16 db 0
+
+section .text
+_start:
+    push 3
+    push 2
+    call proc_soma
+    add esp, 8
+    mov dword [x], eax
+    mov eax, dword [x]
+    call print_int
+    call print_newline
+    mov eax, 1
+    xor ebx, ebx
+    int 0x80
+
+proc_soma:
+    push ebp
+    mov ebp, esp
+    mov eax, dword [ebp+8]
+    push eax
+    mov eax, dword [ebp+12]
+    mov ebx, eax
+    pop eax
+    add eax, ebx
+    jmp .proc_soma_epilogue
+.proc_soma_epilogue:
+    mov esp, ebp
+    pop ebp
+    ret
+```
+
+> `jmp .proc_soma_epilogue` desvia para o epílogo compartilhado do procedimento, permitindo que múltiplos `retorna` reutilizem o mesmo bloco de desmontagem do frame.
+
+---
+
+### Exemplo 9 — Procedimento vazio
+
+**Entrada (linguagem SIMPLES):**
+
+```
+procedimento vazio imprime_um()
+inicio
+  escreval 1;
+  retorna;
+fim
+
+programa demo
+inicio
+  imprime_um();
+fim
+```
+
+**Saída (NASM 32-bit):**
+
+```nasm
+global _start
+
+section .data
+newline db 10
+print_buffer times 12 db 0
+read_buffer times 16 db 0
+
+section .text
+_start:
+    call proc_imprime_um
+    mov eax, 1
+    xor ebx, ebx
+    int 0x80
+
+proc_imprime_um:
+    push ebp
+    mov ebp, esp
+    mov eax, 1
+    call print_int
+    call print_newline
+    jmp .proc_imprime_um_epilogue
+.proc_imprime_um_epilogue:
+    mov esp, ebp
+    pop ebp
+    ret
+
+; helpers read_int, print_int e print_newline omitidos por brevidade
+```
+
+---
+
+### Exemplo 10 — Programa sem procedimentos
+
+**Entrada (linguagem SIMPLES):**
+
+```
+programa demo
+inteiro x;
+inicio
+  x <- 1;
+  escreval x;
+fim
 ```
 
 ---
@@ -692,12 +836,17 @@ Todas invocadas via `int 0x80`.
 | RF10 | Labels únicos gerados para condicionais e laços aninhados | Alta |
 | RF11 | Mensagens de erro apontam linha e coluna do problema | Média |
 | RF12 | Arquivo `.asm` gerado é montável pelo NASM sem warnings | Alta |
+| RF13 | Parser aceita zero ou mais procedimentos antes do bloco `programa` | Alta |
+| RF14 | Parser aceita declarações de procedimentos tipados com parâmetros | Alta |
+| RF15 | Análise semântica valida assinaturas, aridade e tipos de argumentos | Alta |
+| RF16 | Análise semântica valida presença de `retorna <expressao>;` em procedimentos não-`vazio` e rejeita `retorna` com expressão em procedimentos `vazio` | Alta |
+| RF17 | Code generator produz NASM válido para chamadas e retornos de procedimentos `inteiro` | Alta |
+| RF18 | Code generator rejeita com diagnóstico explícito procedimentos `flutuante` | Alta |
 
 ## Out of Scope (v1.0)
 
-- Procedimentos (`procedimento`/`retorna`)
+- Geração de código para procedimentos `flutuante` (sintaxe e semântica aceitas; backend rejeita explicitamente)
 - Vetores e strings
-- Números de ponto flutuante na geração de código (declaração permitida)
 - Otimizações de código (constant folding, dead code elimination)
 - Suporte a Windows (PE/COFF)
 - Recuperação de erros (modo pânico) — o compilador para no primeiro erro
@@ -879,3 +1028,7 @@ clean:
 - [ ]  Laços aninhados geram labels únicos sem conflito
 - [ ]  Erros de variável não declarada são reportados com número de linha
 - [ ]  O `.asm` gerado não produz warnings no NASM
+- [ ]  O exemplo `procedure_sum.simples` compila, monta e executa produzindo o resultado correto
+- [ ]  O exemplo `procedure_void.simples` compila, monta e executa produzindo o resultado correto
+- [ ]  Procedimentos `flutuante` são rejeitados na geração de código com diagnóstico explícito
+- [ ]  Um arquivo sem procedimentos (só `programa`) continua compilando corretamente

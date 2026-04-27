@@ -1,0 +1,11 @@
+procedimento inteiro soma(inteiro a, inteiro b)
+inicio
+  retorna a + b;
+fim
+
+programa demo
+inteiro x;
+inicio
+  x <- soma(2, 3);
+  escreval x;
+fim
