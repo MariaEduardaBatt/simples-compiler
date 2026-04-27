@@ -92,53 +92,6 @@ static bool parser_oom(const Parser *parser, CompilerError *error) {
     return parser_fail_current(parser, error, "Memoria insuficiente.");
 }
 
-static void parser_free_expression_list(ASTExpression **expressions, size_t expression_count) {
-    size_t index;
-
-    for (index = 0; index < expression_count; ++index) {
-        ast_expression_free(expressions[index]);
-    }
-
-    free(expressions);
-}
-
-static void parser_free_declaration_list(ASTDeclaration *declarations, size_t declaration_count) {
-    size_t index;
-
-    for (index = 0; index < declaration_count; ++index) {
-        free(declarations[index].name);
-    }
-
-    free(declarations);
-}
-
-static void parser_free_parameter_list(ASTParameter *parameters, size_t parameter_count) {
-    size_t index;
-
-    for (index = 0; index < parameter_count; ++index) {
-        free(parameters[index].name);
-    }
-
-    free(parameters);
-}
-
-static void parser_free_procedure(ASTProcedure *procedure) {
-    size_t index;
-
-    if (procedure == NULL) {
-        return;
-    }
-
-    free(procedure->name);
-    parser_free_parameter_list(procedure->parameters, procedure->parameter_count);
-    parser_free_declaration_list(procedure->local_declarations, procedure->local_declaration_count);
-    for (index = 0; index < procedure->command_count; ++index) {
-        ast_command_free(&procedure->commands[index]);
-    }
-    free(procedure->commands);
-    memset(procedure, 0, sizeof(*procedure));
-}
-
 static ASTExpression *parser_make_int_expression(const Token *token, int value) {
     ASTExpression *expression = calloc(1, sizeof(*expression));
 
@@ -387,7 +340,7 @@ static bool parse_argument_list(Parser *parser, ASTExpression ***arguments, size
         ASTExpression *argument = parse_expression(parser, error);
 
         if (argument == NULL) {
-            parser_free_expression_list(*arguments, *argument_count);
+            ast_expression_list_free(*arguments, *argument_count);
             *arguments = NULL;
             *argument_count = 0;
             return false;
@@ -395,7 +348,7 @@ static bool parse_argument_list(Parser *parser, ASTExpression ***arguments, size
 
         if (!parser_append_argument(arguments, argument_count, argument)) {
             ast_expression_free(argument);
-            parser_free_expression_list(*arguments, *argument_count);
+            ast_expression_list_free(*arguments, *argument_count);
             *arguments = NULL;
             *argument_count = 0;
             return parser_oom(parser, error);
@@ -403,7 +356,7 @@ static bool parse_argument_list(Parser *parser, ASTExpression ***arguments, size
     } while (parser_match(parser, TOK_VIRGULA));
 
     if (!parser_expect(parser, TOK_FECHA_PAR, error, "Esperado ')'.")) {
-        parser_free_expression_list(*arguments, *argument_count);
+        ast_expression_list_free(*arguments, *argument_count);
         *arguments = NULL;
         *argument_count = 0;
         return false;
@@ -435,7 +388,7 @@ static ASTExpression *parse_factor(Parser *parser, CompilerError *error) {
 
         expression = parser_make_call_expression(token, arguments, argument_count);
         if (expression == NULL) {
-            parser_free_expression_list(arguments, argument_count);
+            ast_expression_list_free(arguments, argument_count);
             parser_oom(parser, error);
         }
         return expression;
@@ -732,14 +685,14 @@ static bool parse_parameter_list(Parser *parser, ASTParameter **parameters, size
         const Token *name_token;
 
         if (!parse_type(parser, false, &parameter_type, error)) {
-            parser_free_parameter_list(*parameters, *parameter_count);
+            ast_parameter_list_free(*parameters, *parameter_count);
             *parameters = NULL;
             *parameter_count = 0;
             return false;
         }
 
         if (!parser_expect(parser, TOK_ID, error, "Esperado identificador no parametro.")) {
-            parser_free_parameter_list(*parameters, *parameter_count);
+            ast_parameter_list_free(*parameters, *parameter_count);
             *parameters = NULL;
             *parameter_count = 0;
             return false;
@@ -748,7 +701,7 @@ static bool parse_parameter_list(Parser *parser, ASTParameter **parameters, size
         name_token = parser_previous(parser);
         parameter.name = parser_strdup(name_token->lexeme);
         if (parameter.name == NULL) {
-            parser_free_parameter_list(*parameters, *parameter_count);
+            ast_parameter_list_free(*parameters, *parameter_count);
             *parameters = NULL;
             *parameter_count = 0;
             return parser_oom(parser, error);
@@ -759,7 +712,7 @@ static bool parse_parameter_list(Parser *parser, ASTParameter **parameters, size
 
         if (!parser_append_parameter(parameters, parameter_count, parameter)) {
             free(parameter.name);
-            parser_free_parameter_list(*parameters, *parameter_count);
+            ast_parameter_list_free(*parameters, *parameter_count);
             *parameters = NULL;
             *parameter_count = 0;
             return parser_oom(parser, error);
@@ -767,7 +720,7 @@ static bool parse_parameter_list(Parser *parser, ASTParameter **parameters, size
     } while (parser_match(parser, TOK_VIRGULA));
 
     if (!parser_expect(parser, TOK_FECHA_PAR, error, "Esperado ')'.")) {
-        parser_free_parameter_list(*parameters, *parameter_count);
+        ast_parameter_list_free(*parameters, *parameter_count);
         *parameters = NULL;
         *parameter_count = 0;
         return false;
@@ -808,7 +761,7 @@ static bool parse_procedure(Parser *parser, ASTProcedure *procedure, CompilerErr
             sizeof(command_terminators) / sizeof(command_terminators[0]),
             error) ||
         !parser_expect(parser, TOK_FIM, error, "Esperado 'fim'.")) {
-        parser_free_procedure(procedure);
+        ast_procedure_free(procedure);
         return false;
     }
 
@@ -1072,7 +1025,7 @@ bool parse_program(const TokenList *tokens, ASTProgram **out_program, CompilerEr
         }
 
         if (!parser_append_procedure(program, procedure)) {
-            parser_free_procedure(&procedure);
+            ast_procedure_free(&procedure);
             ast_program_free(program);
             compiler_error_set(error, COMPILER_PHASE_PARSER, parser_current(&parser)->line, parser_current(&parser)->column, "Memoria insuficiente.");
             return false;

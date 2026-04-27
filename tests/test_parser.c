@@ -6,6 +6,8 @@
 #include "token.h"
 
 #include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
 
 void setUp(void) {}
 
@@ -27,6 +29,33 @@ static ASTProgram *parse_source(const char *source, TokenList *tokens) {
     TEST_ASSERT_TRUE(parse_program(tokens, &program, &error));
     TEST_ASSERT_NOT_NULL(program);
     return program;
+}
+
+static char *copy_text(const char *text) {
+    size_t length = strlen(text) + 1;
+    char *copy = malloc(length);
+
+    TEST_ASSERT_NOT_NULL(copy);
+    memcpy(copy, text, length);
+    return copy;
+}
+
+static ASTExpression *make_int_expression(int value) {
+    ASTExpression *expression = calloc(1, sizeof(*expression));
+
+    TEST_ASSERT_NOT_NULL(expression);
+    expression->type = AST_EXPR_INT;
+    expression->int_value = value;
+    return expression;
+}
+
+static ASTExpression *make_identifier_expression(const char *name) {
+    ASTExpression *expression = calloc(1, sizeof(*expression));
+
+    TEST_ASSERT_NOT_NULL(expression);
+    expression->type = AST_EXPR_IDENTIFIER;
+    expression->identifier = copy_text(name);
+    return expression;
 }
 
 void test_parser_builds_assignment_ast_with_expected_counts_and_shape(void) {
@@ -390,6 +419,47 @@ void test_parser_accepts_void_call_command_and_return_without_expression(void) {
     token_list_free(&tokens);
 }
 
+void test_ast_procedure_free_releases_owned_members_and_resets_fields(void) {
+    ASTProcedure procedure = {0};
+
+    procedure.name = copy_text("ping");
+    procedure.parameters = calloc(1, sizeof(*procedure.parameters));
+    procedure.local_declarations = calloc(1, sizeof(*procedure.local_declarations));
+    procedure.commands = calloc(2, sizeof(*procedure.commands));
+
+    TEST_ASSERT_NOT_NULL(procedure.parameters);
+    TEST_ASSERT_NOT_NULL(procedure.local_declarations);
+    TEST_ASSERT_NOT_NULL(procedure.commands);
+
+    procedure.parameter_count = 1;
+    procedure.parameters[0].name = copy_text("value");
+
+    procedure.local_declaration_count = 1;
+    procedure.local_declarations[0].name = copy_text("local");
+
+    procedure.command_count = 2;
+    procedure.commands[0].type = AST_COMMAND_CALL;
+    procedure.commands[0].call_command.call.name = copy_text("print");
+    procedure.commands[0].call_command.call.arguments = calloc(2, sizeof(*procedure.commands[0].call_command.call.arguments));
+    TEST_ASSERT_NOT_NULL(procedure.commands[0].call_command.call.arguments);
+    procedure.commands[0].call_command.call.argument_count = 2;
+    procedure.commands[0].call_command.call.arguments[0] = make_int_expression(1);
+    procedure.commands[0].call_command.call.arguments[1] = make_identifier_expression("value");
+
+    procedure.commands[1].type = AST_COMMAND_RETURN;
+    procedure.commands[1].return_command.expression = make_int_expression(0);
+
+    ast_procedure_free(&procedure);
+
+    TEST_ASSERT_NULL(procedure.name);
+    TEST_ASSERT_NULL(procedure.parameters);
+    TEST_ASSERT_EQUAL_size_t(0, procedure.parameter_count);
+    TEST_ASSERT_NULL(procedure.local_declarations);
+    TEST_ASSERT_EQUAL_size_t(0, procedure.local_declaration_count);
+    TEST_ASSERT_NULL(procedure.commands);
+    TEST_ASSERT_EQUAL_size_t(0, procedure.command_count);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_parser_builds_assignment_ast_with_expected_counts_and_shape);
@@ -413,5 +483,6 @@ int main(void) {
     RUN_TEST(test_parser_parses_read_command_target);
     RUN_TEST(test_parser_accepts_optional_top_level_procedures_before_program);
     RUN_TEST(test_parser_accepts_void_call_command_and_return_without_expression);
+    RUN_TEST(test_ast_procedure_free_releases_owned_members_and_resets_fields);
     return UNITY_END();
 }

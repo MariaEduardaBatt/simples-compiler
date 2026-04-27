@@ -235,6 +235,8 @@ static bool collect_for_loop_ids_in_command(SizeList *for_loop_ids, size_t *next
         case AST_COMMAND_READ:
         case AST_COMMAND_WRITE:
         case AST_COMMAND_WRITELN:
+        case AST_COMMAND_CALL:
+        case AST_COMMAND_RETURN:
             return true;
         default:
             return false;
@@ -351,6 +353,9 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command)
             return generate_expression(context, command->write.expression) &&
                    builder_append(builder, "    call print_int\n") &&
                    builder_append(builder, "    call print_newline\n");
+        case AST_COMMAND_CALL:
+        case AST_COMMAND_RETURN:
+            return false;
         case AST_COMMAND_IF: {
             size_t label_id = context->next_label_id++;
 

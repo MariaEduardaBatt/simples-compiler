@@ -1,8 +1,9 @@
 #include "ast.h"
 
 #include <stdlib.h>
+#include <string.h>
 
-static void ast_expression_list_free(ASTExpression **expressions, size_t expression_count) {
+void ast_expression_list_free(ASTExpression **expressions, size_t expression_count) {
     size_t index;
 
     for (index = 0; index < expression_count; ++index) {
@@ -31,7 +32,7 @@ static void ast_command_list_free(ASTCommand *commands, size_t command_count) {
     free(commands);
 }
 
-static void ast_declaration_list_free(ASTDeclaration *declarations, size_t declaration_count) {
+void ast_declaration_list_free(ASTDeclaration *declarations, size_t declaration_count) {
     size_t index;
 
     for (index = 0; index < declaration_count; ++index) {
@@ -41,7 +42,7 @@ static void ast_declaration_list_free(ASTDeclaration *declarations, size_t decla
     free(declarations);
 }
 
-static void ast_parameter_list_free(ASTParameter *parameters, size_t parameter_count) {
+void ast_parameter_list_free(ASTParameter *parameters, size_t parameter_count) {
     size_t index;
 
     for (index = 0; index < parameter_count; ++index) {
@@ -55,12 +56,7 @@ static void ast_procedure_list_free(ASTProcedure *procedures, size_t procedure_c
     size_t index;
 
     for (index = 0; index < procedure_count; ++index) {
-        ASTProcedure *procedure = &procedures[index];
-
-        free(procedure->name);
-        ast_parameter_list_free(procedure->parameters, procedure->parameter_count);
-        ast_declaration_list_free(procedure->local_declarations, procedure->local_declaration_count);
-        ast_command_list_free(procedure->commands, procedure->command_count);
+        ast_procedure_free(&procedures[index]);
     }
 
     free(procedures);
@@ -136,6 +132,18 @@ void ast_command_free(ASTCommand *command) {
         default:
             break;
     }
+}
+
+void ast_procedure_free(ASTProcedure *procedure) {
+    if (procedure == NULL) {
+        return;
+    }
+
+    free(procedure->name);
+    ast_parameter_list_free(procedure->parameters, procedure->parameter_count);
+    ast_declaration_list_free(procedure->local_declarations, procedure->local_declaration_count);
+    ast_command_list_free(procedure->commands, procedure->command_count);
+    memset(procedure, 0, sizeof(*procedure));
 }
 
 void ast_program_free(ASTProgram *program) {

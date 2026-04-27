@@ -187,7 +187,11 @@ typedef struct {
 } ASTProgram;
 
 void ast_expression_free(ASTExpression *expression);
+void ast_expression_list_free(ASTExpression **expressions, size_t expression_count);
+void ast_declaration_list_free(ASTDeclaration *declarations, size_t declaration_count);
+void ast_parameter_list_free(ASTParameter *parameters, size_t parameter_count);
 void ast_command_free(ASTCommand *command);
+void ast_procedure_free(ASTProcedure *procedure);
 void ast_program_free(ASTProgram *program);
 
 #endif
