@@ -56,6 +56,18 @@ static TokenType lexer_keyword_type(const char *start, size_t length) {
     if (lexer_span_is(start, length, "inteiro")) {
         return TOK_INTEIRO;
     }
+    if (lexer_span_is(start, length, "flutuante")) {
+        return TOK_FLUTUANTE;
+    }
+    if (lexer_span_is(start, length, "vazio")) {
+        return TOK_VAZIO;
+    }
+    if (lexer_span_is(start, length, "procedimento")) {
+        return TOK_PROCEDIMENTO;
+    }
+    if (lexer_span_is(start, length, "retorna")) {
+        return TOK_RETORNA;
+    }
     if (lexer_span_is(start, length, "escreva")) {
         return TOK_ESCREVA;
     }
@@ -193,13 +205,24 @@ bool lexer_scan(const char *source, TokenList *out_tokens, CompilerError *error)
         if (isdigit((unsigned char)current)) {
             const char *start = state.source + state.index;
             size_t length = 0;
+            bool is_float = false;
 
             while (isdigit((unsigned char)lexer_peek(&state))) {
                 lexer_advance(&state);
                 length++;
             }
 
-            if (!lexer_push_span(out_tokens, TOK_NUM_INT, start, length, token_line, token_column)) {
+            if (lexer_peek(&state) == '.' && isdigit((unsigned char)state.source[state.index + 1])) {
+                is_float = true;
+                lexer_advance(&state);
+                length++;
+                while (isdigit((unsigned char)lexer_peek(&state))) {
+                    lexer_advance(&state);
+                    length++;
+                }
+            }
+
+            if (!lexer_push_span(out_tokens, is_float ? TOK_NUM_FLOAT : TOK_NUM_INT, start, length, token_line, token_column)) {
                 lexer_fail(out_tokens, error, token_line, token_column, "Falha ao registrar token.");
                 return false;
             }

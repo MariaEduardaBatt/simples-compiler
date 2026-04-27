@@ -141,6 +141,22 @@ void test_lexer_scans_leia_statement(void) {
     token_list_free(&tokens);
 }
 
+void test_lexer_scans_procedure_keywords_and_float_literal(void) {
+    const char *source = "procedimento flutuante soma(flutuante x) inicio retorna 3.14; fim";
+    TokenList tokens = {0};
+    CompilerError error = {0};
+
+    token_list_init(&tokens);
+    TEST_ASSERT_TRUE(lexer_scan(source, &tokens, &error));
+    assert_token(&tokens, 0, TOK_PROCEDIMENTO, "procedimento", 1, 1);
+    assert_token(&tokens, 1, TOK_FLUTUANTE, "flutuante", 1, 14);
+    assert_token(&tokens, 3, TOK_ABRE_PAR, "(", 1, 28);
+    assert_token(&tokens, 4, TOK_FLUTUANTE, "flutuante", 1, 29);
+    assert_token(&tokens, 8, TOK_RETORNA, "retorna", 1, 49);
+    assert_token(&tokens, 9, TOK_NUM_FLOAT, "3.14", 1, 57);
+    token_list_free(&tokens);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_lexer_scans_program_structure_into_expected_tokens);
@@ -150,5 +166,6 @@ int main(void) {
     RUN_TEST(test_lexer_accepts_zero_initialized_token_list);
     RUN_TEST(test_lexer_resets_initialized_output_tokens_before_each_scan);
     RUN_TEST(test_lexer_scans_leia_statement);
+    RUN_TEST(test_lexer_scans_procedure_keywords_and_float_literal);
     return UNITY_END();
 }
