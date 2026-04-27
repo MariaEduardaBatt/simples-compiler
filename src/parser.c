@@ -88,6 +88,57 @@ static bool parser_expect(Parser *parser, TokenType type, CompilerError *error, 
     return parser_fail_current(parser, error, message);
 }
 
+static bool parser_oom(const Parser *parser, CompilerError *error) {
+    return parser_fail_current(parser, error, "Memoria insuficiente.");
+}
+
+static void parser_free_expression_list(ASTExpression **expressions, size_t expression_count) {
+    size_t index;
+
+    for (index = 0; index < expression_count; ++index) {
+        ast_expression_free(expressions[index]);
+    }
+
+    free(expressions);
+}
+
+static void parser_free_declaration_list(ASTDeclaration *declarations, size_t declaration_count) {
+    size_t index;
+
+    for (index = 0; index < declaration_count; ++index) {
+        free(declarations[index].name);
+    }
+
+    free(declarations);
+}
+
+static void parser_free_parameter_list(ASTParameter *parameters, size_t parameter_count) {
+    size_t index;
+
+    for (index = 0; index < parameter_count; ++index) {
+        free(parameters[index].name);
+    }
+
+    free(parameters);
+}
+
+static void parser_free_procedure(ASTProcedure *procedure) {
+    size_t index;
+
+    if (procedure == NULL) {
+        return;
+    }
+
+    free(procedure->name);
+    parser_free_parameter_list(procedure->parameters, procedure->parameter_count);
+    parser_free_declaration_list(procedure->local_declarations, procedure->local_declaration_count);
+    for (index = 0; index < procedure->command_count; ++index) {
+        ast_command_free(&procedure->commands[index]);
+    }
+    free(procedure->commands);
+    memset(procedure, 0, sizeof(*procedure));
+}
+
 static ASTExpression *parser_make_int_expression(const Token *token, int value) {
     ASTExpression *expression = calloc(1, sizeof(*expression));
 
@@ -99,6 +150,20 @@ static ASTExpression *parser_make_int_expression(const Token *token, int value) 
     expression->line = token != NULL ? token->line : 1;
     expression->column = token != NULL ? token->column : 1;
     expression->int_value = value;
+    return expression;
+}
+
+static ASTExpression *parser_make_float_expression(const Token *token, double value) {
+    ASTExpression *expression = calloc(1, sizeof(*expression));
+
+    if (expression == NULL) {
+        return NULL;
+    }
+
+    expression->type = AST_EXPR_FLOAT;
+    expression->line = token != NULL ? token->line : 1;
+    expression->column = token != NULL ? token->column : 1;
+    expression->float_value = value;
     return expression;
 }
 
@@ -118,6 +183,28 @@ static ASTExpression *parser_make_identifier_expression(const Token *token) {
         return NULL;
     }
 
+    return expression;
+}
+
+static ASTExpression *parser_make_call_expression(const Token *token, ASTExpression **arguments, size_t argument_count) {
+    ASTExpression *expression = calloc(1, sizeof(*expression));
+
+    if (expression == NULL) {
+        return NULL;
+    }
+
+    expression->type = AST_EXPR_CALL;
+    expression->line = token != NULL ? token->line : 1;
+    expression->column = token != NULL ? token->column : 1;
+    expression->call.name = parser_strdup(token != NULL ? token->lexeme : NULL);
+    if (expression->call.name == NULL) {
+        free(expression);
+        return NULL;
+    }
+    expression->call.line = token != NULL ? token->line : 1;
+    expression->call.column = token != NULL ? token->column : 1;
+    expression->call.arguments = arguments;
+    expression->call.argument_count = argument_count;
     return expression;
 }
 
@@ -152,23 +239,33 @@ static ASTExpression *parser_make_unary_expression(const Token *token, ASTUnaryO
     return expression;
 }
 
-static bool parser_append_declaration(ASTProgram *program, ASTDeclaration declaration) {
-    ASTDeclaration *items;
+static bool parser_append_declaration(ASTDeclaration **declarations, size_t *declaration_count, ASTDeclaration declaration) {
+    ASTDeclaration *items = realloc(*declarations, (*declaration_count + 1) * sizeof(**declarations));
 
-    items = realloc(program->declarations, (program->declaration_count + 1) * sizeof(*program->declarations));
     if (items == NULL) {
         return false;
     }
 
-    program->declarations = items;
-    program->declarations[program->declaration_count++] = declaration;
+    *declarations = items;
+    (*declarations)[(*declaration_count)++] = declaration;
+    return true;
+}
+
+static bool parser_append_parameter(ASTParameter **parameters, size_t *parameter_count, ASTParameter parameter) {
+    ASTParameter *items = realloc(*parameters, (*parameter_count + 1) * sizeof(**parameters));
+
+    if (items == NULL) {
+        return false;
+    }
+
+    *parameters = items;
+    (*parameters)[(*parameter_count)++] = parameter;
     return true;
 }
 
 static bool parser_append_command(ASTCommand **commands, size_t *count, ASTCommand command) {
-    ASTCommand *items;
+    ASTCommand *items = realloc(*commands, (*count + 1) * sizeof(**commands));
 
-    items = realloc(*commands, (*count + 1) * sizeof(**commands));
     if (items == NULL) {
         return false;
     }
@@ -178,8 +275,51 @@ static bool parser_append_command(ASTCommand **commands, size_t *count, ASTComma
     return true;
 }
 
-static bool parser_oom(const Parser *parser, CompilerError *error) {
-    return parser_fail_current(parser, error, "Memoria insuficiente.");
+static bool parser_append_procedure(ASTProgram *program, ASTProcedure procedure) {
+    ASTProcedure *items = realloc(program->procedures, (program->procedure_count + 1) * sizeof(*program->procedures));
+
+    if (items == NULL) {
+        return false;
+    }
+
+    program->procedures = items;
+    program->procedures[program->procedure_count++] = procedure;
+    return true;
+}
+
+static bool parser_append_argument(ASTExpression ***arguments, size_t *argument_count, ASTExpression *argument) {
+    ASTExpression **items = realloc(*arguments, (*argument_count + 1) * sizeof(**arguments));
+
+    if (items == NULL) {
+        return false;
+    }
+
+    *arguments = items;
+    (*arguments)[(*argument_count)++] = argument;
+    return true;
+}
+
+static bool parse_type(Parser *parser, bool allow_void, ASTType *out_type, CompilerError *error) {
+    if (parser_match(parser, TOK_INTEIRO)) {
+        *out_type = AST_TYPE_INTEIRO;
+        return true;
+    }
+
+    if (parser_match(parser, TOK_FLUTUANTE)) {
+        *out_type = AST_TYPE_FLUTUANTE;
+        return true;
+    }
+
+    if (allow_void && parser_match(parser, TOK_VAZIO)) {
+        *out_type = AST_TYPE_VAZIO;
+        return true;
+    }
+
+    return parser_fail_current(parser, error, allow_void ? "Esperado tipo de retorno." : "Esperado tipo.");
+}
+
+static bool parser_is_declaration_type(const Parser *parser) {
+    return parser_check(parser, TOK_INTEIRO) || parser_check(parser, TOK_FLUTUANTE);
 }
 
 static ASTExpression *parse_expression(Parser *parser, CompilerError *error);
@@ -189,7 +329,9 @@ static bool parser_command_requires_semicolon(ASTCommandType type) {
     return type == AST_COMMAND_ASSIGNMENT ||
            type == AST_COMMAND_READ ||
            type == AST_COMMAND_WRITE ||
-           type == AST_COMMAND_WRITELN;
+           type == AST_COMMAND_WRITELN ||
+           type == AST_COMMAND_CALL ||
+           type == AST_COMMAND_RETURN;
 }
 
 static bool parser_is_terminator(const Parser *parser, const TokenType *terminators, size_t terminator_count) {
@@ -233,14 +375,67 @@ static bool parse_command_list(
     return true;
 }
 
+static bool parse_argument_list(Parser *parser, ASTExpression ***arguments, size_t *argument_count, CompilerError *error) {
+    *arguments = NULL;
+    *argument_count = 0;
+
+    if (parser_match(parser, TOK_FECHA_PAR)) {
+        return true;
+    }
+
+    do {
+        ASTExpression *argument = parse_expression(parser, error);
+
+        if (argument == NULL) {
+            parser_free_expression_list(*arguments, *argument_count);
+            *arguments = NULL;
+            *argument_count = 0;
+            return false;
+        }
+
+        if (!parser_append_argument(arguments, argument_count, argument)) {
+            ast_expression_free(argument);
+            parser_free_expression_list(*arguments, *argument_count);
+            *arguments = NULL;
+            *argument_count = 0;
+            return parser_oom(parser, error);
+        }
+    } while (parser_match(parser, TOK_VIRGULA));
+
+    if (!parser_expect(parser, TOK_FECHA_PAR, error, "Esperado ')'.")) {
+        parser_free_expression_list(*arguments, *argument_count);
+        *arguments = NULL;
+        *argument_count = 0;
+        return false;
+    }
+
+    return true;
+}
+
 static ASTExpression *parse_factor(Parser *parser, CompilerError *error) {
     const Token *token;
     ASTExpression *expression;
 
     if (parser_match(parser, TOK_ID)) {
+        ASTExpression **arguments = NULL;
+        size_t argument_count = 0;
+
         token = parser_previous(parser);
-        expression = parser_make_identifier_expression(token);
+        if (!parser_match(parser, TOK_ABRE_PAR)) {
+            expression = parser_make_identifier_expression(token);
+            if (expression == NULL) {
+                parser_oom(parser, error);
+            }
+            return expression;
+        }
+
+        if (!parse_argument_list(parser, &arguments, &argument_count, error)) {
+            return NULL;
+        }
+
+        expression = parser_make_call_expression(token, arguments, argument_count);
         if (expression == NULL) {
+            parser_free_expression_list(arguments, argument_count);
             parser_oom(parser, error);
         }
         return expression;
@@ -258,6 +453,23 @@ static ASTExpression *parse_factor(Parser *parser, CompilerError *error) {
         }
 
         expression = parser_make_int_expression(token, (int)value);
+        if (expression == NULL) {
+            parser_oom(parser, error);
+        }
+        return expression;
+    }
+
+    if (parser_match(parser, TOK_NUM_FLOAT)) {
+        double value;
+
+        token = parser_previous(parser);
+        errno = 0;
+        value = strtod(token->lexeme, NULL);
+        if (errno == ERANGE) {
+            parser_fail_at(token, error, "Literal flutuante fora do intervalo.");
+            return NULL;
+        }
+        expression = parser_make_float_expression(token, value);
         if (expression == NULL) {
             parser_oom(parser, error);
         }
@@ -467,8 +679,14 @@ static ASTExpression *parse_expression(Parser *parser, CompilerError *error) {
     return parse_logical(parser, error);
 }
 
-static bool parse_declaration_list(Parser *parser, ASTProgram *program, CompilerError *error) {
-    while (parser_match(parser, TOK_INTEIRO)) {
+static bool parse_declaration_list(Parser *parser, ASTDeclaration **declarations, size_t *declaration_count, CompilerError *error) {
+    while (parser_is_declaration_type(parser)) {
+        ASTType declaration_type;
+
+        if (!parse_type(parser, false, &declaration_type, error)) {
+            return false;
+        }
+
         do {
             const Token *name_token;
             ASTDeclaration declaration = {0};
@@ -482,10 +700,11 @@ static bool parse_declaration_list(Parser *parser, ASTProgram *program, Compiler
             if (declaration.name == NULL) {
                 return parser_oom(parser, error);
             }
+            declaration.type = declaration_type;
             declaration.line = name_token->line;
             declaration.column = name_token->column;
 
-            if (!parser_append_declaration(program, declaration)) {
+            if (!parser_append_declaration(declarations, declaration_count, declaration)) {
                 free(declaration.name);
                 return parser_oom(parser, error);
             }
@@ -499,32 +718,145 @@ static bool parse_declaration_list(Parser *parser, ASTProgram *program, Compiler
     return true;
 }
 
+static bool parse_parameter_list(Parser *parser, ASTParameter **parameters, size_t *parameter_count, CompilerError *error) {
+    *parameters = NULL;
+    *parameter_count = 0;
+
+    if (parser_match(parser, TOK_FECHA_PAR)) {
+        return true;
+    }
+
+    do {
+        ASTType parameter_type;
+        ASTParameter parameter = {0};
+        const Token *name_token;
+
+        if (!parse_type(parser, false, &parameter_type, error)) {
+            parser_free_parameter_list(*parameters, *parameter_count);
+            *parameters = NULL;
+            *parameter_count = 0;
+            return false;
+        }
+
+        if (!parser_expect(parser, TOK_ID, error, "Esperado identificador no parametro.")) {
+            parser_free_parameter_list(*parameters, *parameter_count);
+            *parameters = NULL;
+            *parameter_count = 0;
+            return false;
+        }
+
+        name_token = parser_previous(parser);
+        parameter.name = parser_strdup(name_token->lexeme);
+        if (parameter.name == NULL) {
+            parser_free_parameter_list(*parameters, *parameter_count);
+            *parameters = NULL;
+            *parameter_count = 0;
+            return parser_oom(parser, error);
+        }
+        parameter.type = parameter_type;
+        parameter.line = name_token->line;
+        parameter.column = name_token->column;
+
+        if (!parser_append_parameter(parameters, parameter_count, parameter)) {
+            free(parameter.name);
+            parser_free_parameter_list(*parameters, *parameter_count);
+            *parameters = NULL;
+            *parameter_count = 0;
+            return parser_oom(parser, error);
+        }
+    } while (parser_match(parser, TOK_VIRGULA));
+
+    if (!parser_expect(parser, TOK_FECHA_PAR, error, "Esperado ')'.")) {
+        parser_free_parameter_list(*parameters, *parameter_count);
+        *parameters = NULL;
+        *parameter_count = 0;
+        return false;
+    }
+
+    return true;
+}
+
+static bool parse_procedure(Parser *parser, ASTProcedure *procedure, CompilerError *error) {
+    static const TokenType command_terminators[] = {TOK_FIM};
+    const Token *name_token;
+
+    memset(procedure, 0, sizeof(*procedure));
+
+    if (!parser_expect(parser, TOK_PROCEDIMENTO, error, "Esperado 'procedimento'.") ||
+        !parse_type(parser, true, &procedure->return_type, error) ||
+        !parser_expect(parser, TOK_ID, error, "Esperado identificador do procedimento.")) {
+        return false;
+    }
+
+    name_token = parser_previous(parser);
+    procedure->name = parser_strdup(name_token->lexeme);
+    if (procedure->name == NULL) {
+        return parser_oom(parser, error);
+    }
+    procedure->line = name_token->line;
+    procedure->column = name_token->column;
+
+    if (!parser_expect(parser, TOK_ABRE_PAR, error, "Esperado '('.") ||
+        !parse_parameter_list(parser, &procedure->parameters, &procedure->parameter_count, error) ||
+        !parser_expect(parser, TOK_INICIO, error, "Esperado 'inicio'.") ||
+        !parse_declaration_list(parser, &procedure->local_declarations, &procedure->local_declaration_count, error) ||
+        !parse_command_list(
+            parser,
+            &procedure->commands,
+            &procedure->command_count,
+            command_terminators,
+            sizeof(command_terminators) / sizeof(command_terminators[0]),
+            error) ||
+        !parser_expect(parser, TOK_FIM, error, "Esperado 'fim'.")) {
+        parser_free_procedure(procedure);
+        return false;
+    }
+
+    return true;
+}
+
 static bool parse_command(Parser *parser, ASTCommand *command, CompilerError *error) {
     memset(command, 0, sizeof(*command));
 
     if (parser_match(parser, TOK_ID)) {
         const Token *name_token = parser_previous(parser);
 
-        command->type = AST_COMMAND_ASSIGNMENT;
-        command->assignment.name = parser_strdup(name_token->lexeme);
-        if (command->assignment.name == NULL) {
-            return parser_oom(parser, error);
-        }
-        command->assignment.line = name_token->line;
-        command->assignment.column = name_token->column;
-
-        if (!parser_expect(parser, TOK_ATRIB, error, "Esperado '<-' na atribuicao.")) {
-            ast_command_free(command);
-            return false;
-        }
-
-        command->assignment.expression = parse_expression(parser, error);
-        if (command->assignment.expression == NULL) {
-            ast_command_free(command);
-            return false;
+        if (parser_match(parser, TOK_ATRIB)) {
+            command->type = AST_COMMAND_ASSIGNMENT;
+            command->assignment.name = parser_strdup(name_token->lexeme);
+            if (command->assignment.name == NULL) {
+                return parser_oom(parser, error);
+            }
+            command->assignment.line = name_token->line;
+            command->assignment.column = name_token->column;
+            command->assignment.expression = parse_expression(parser, error);
+            if (command->assignment.expression == NULL) {
+                ast_command_free(command);
+                return false;
+            }
+            return true;
         }
 
-        return true;
+        if (parser_match(parser, TOK_ABRE_PAR)) {
+            command->type = AST_COMMAND_CALL;
+            command->call_command.call.name = parser_strdup(name_token->lexeme);
+            if (command->call_command.call.name == NULL) {
+                return parser_oom(parser, error);
+            }
+            command->call_command.call.line = name_token->line;
+            command->call_command.call.column = name_token->column;
+            if (!parse_argument_list(
+                    parser,
+                    &command->call_command.call.arguments,
+                    &command->call_command.call.argument_count,
+                    error)) {
+                ast_command_free(command);
+                return false;
+            }
+            return true;
+        }
+
+        return parser_fail_at(name_token, error, "Esperado '<-' ou '(' apos identificador.");
     }
 
     if (parser_match(parser, TOK_ESCREVA) || parser_match(parser, TOK_ESCREVAL)) {
@@ -554,6 +886,22 @@ static bool parse_command(Parser *parser, ASTCommand *command, CompilerError *er
 
         command->read.line = name_token->line;
         command->read.column = name_token->column;
+        return true;
+    }
+
+    if (parser_match(parser, TOK_RETORNA)) {
+        const Token *return_token = parser_previous(parser);
+
+        command->type = AST_COMMAND_RETURN;
+        command->return_command.line = return_token->line;
+        command->return_command.column = return_token->column;
+        if (!parser_check(parser, TOK_PONTO_VIRGULA)) {
+            command->return_command.expression = parse_expression(parser, error);
+            if (command->return_command.expression == NULL) {
+                ast_command_free(command);
+                return false;
+            }
+        }
         return true;
     }
 
@@ -659,40 +1007,13 @@ static bool parse_command(Parser *parser, ASTCommand *command, CompilerError *er
         command->for_command.line = iterator_token->line;
         command->for_command.column = iterator_token->column;
 
-        if (!parser_expect(parser, TOK_DE, error, "Esperado 'de'.")) {
-            ast_command_free(command);
-            return false;
-        }
-
-        command->for_command.start_expression = parse_expression(parser, error);
-        if (command->for_command.start_expression == NULL) {
-            ast_command_free(command);
-            return false;
-        }
-
-        if (!parser_expect(parser, TOK_ATE, error, "Esperado 'ate'.")) {
-            ast_command_free(command);
-            return false;
-        }
-
-        command->for_command.end_expression = parse_expression(parser, error);
-        if (command->for_command.end_expression == NULL) {
-            ast_command_free(command);
-            return false;
-        }
-
-        if (!parser_expect(parser, TOK_PASSO, error, "Esperado 'passo'.")) {
-            ast_command_free(command);
-            return false;
-        }
-
-        command->for_command.step_expression = parse_expression(parser, error);
-        if (command->for_command.step_expression == NULL) {
-            ast_command_free(command);
-            return false;
-        }
-
-        if (!parser_expect(parser, TOK_FACA, error, "Esperado 'faca'.")) {
+        if (!parser_expect(parser, TOK_DE, error, "Esperado 'de'.") ||
+            (command->for_command.start_expression = parse_expression(parser, error)) == NULL ||
+            !parser_expect(parser, TOK_ATE, error, "Esperado 'ate'.") ||
+            (command->for_command.end_expression = parse_expression(parser, error)) == NULL ||
+            !parser_expect(parser, TOK_PASSO, error, "Esperado 'passo'.") ||
+            (command->for_command.step_expression = parse_expression(parser, error)) == NULL ||
+            !parser_expect(parser, TOK_FACA, error, "Esperado 'faca'.")) {
             ast_command_free(command);
             return false;
         }
@@ -742,6 +1063,22 @@ bool parse_program(const TokenList *tokens, ASTProgram **out_program, CompilerEr
         return false;
     }
 
+    while (parser_check(&parser, TOK_PROCEDIMENTO)) {
+        ASTProcedure procedure;
+
+        if (!parse_procedure(&parser, &procedure, error)) {
+            ast_program_free(program);
+            return false;
+        }
+
+        if (!parser_append_procedure(program, procedure)) {
+            parser_free_procedure(&procedure);
+            ast_program_free(program);
+            compiler_error_set(error, COMPILER_PHASE_PARSER, parser_current(&parser)->line, parser_current(&parser)->column, "Memoria insuficiente.");
+            return false;
+        }
+    }
+
     if (!parser_expect(&parser, TOK_PROGRAMA, error, "Esperado 'programa'.") ||
         !parser_expect(&parser, TOK_ID, error, "Esperado identificador do programa.")) {
         ast_program_free(program);
@@ -751,11 +1088,16 @@ bool parse_program(const TokenList *tokens, ASTProgram **out_program, CompilerEr
     program->name = parser_strdup(parser_previous(&parser)->lexeme);
     if (program->name == NULL) {
         ast_program_free(program);
-        compiler_error_set(error, COMPILER_PHASE_PARSER, parser_previous(&parser)->line, parser_previous(&parser)->column, "Memoria insuficiente.");
+        compiler_error_set(
+            error,
+            COMPILER_PHASE_PARSER,
+            parser_previous(&parser)->line,
+            parser_previous(&parser)->column,
+            "Memoria insuficiente.");
         return false;
     }
 
-    if (!parse_declaration_list(&parser, program, error) ||
+    if (!parse_declaration_list(&parser, &program->declarations, &program->declaration_count, error) ||
         !parser_expect(&parser, TOK_INICIO, error, "Esperado 'inicio'.") ||
         !parse_command_list(
             &parser,

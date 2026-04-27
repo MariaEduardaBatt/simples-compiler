@@ -346,6 +346,50 @@ void test_parser_parses_read_command_target(void) {
     token_list_free(&tokens);
 }
 
+void test_parser_accepts_optional_top_level_procedures_before_program(void) {
+    const char *source =
+        "procedimento inteiro soma(inteiro a, inteiro b)\n"
+        "inicio\n"
+        "  retorna a + b;\n"
+        "fim\n"
+        "programa demo\n"
+        "inteiro x;\n"
+        "inicio\n"
+        "  x <- soma(1, 2);\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+
+    TEST_ASSERT_EQUAL_size_t(1, program->procedure_count);
+    TEST_ASSERT_EQUAL_STRING("soma", program->procedures[0].name);
+    TEST_ASSERT_EQUAL(AST_TYPE_INTEIRO, program->procedures[0].return_type);
+    TEST_ASSERT_EQUAL_size_t(2, program->procedures[0].parameter_count);
+    TEST_ASSERT_EQUAL(AST_EXPR_CALL, program->commands[0].assignment.expression->type);
+
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_parser_accepts_void_call_command_and_return_without_expression(void) {
+    const char *source =
+        "procedimento vazio ping()\n"
+        "inicio\n"
+        "  retorna;\n"
+        "fim\n"
+        "programa demo\n"
+        "inicio\n"
+        "  ping();\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+
+    TEST_ASSERT_EQUAL(AST_COMMAND_RETURN, program->procedures[0].commands[0].type);
+    TEST_ASSERT_EQUAL(AST_COMMAND_CALL, program->commands[0].type);
+
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_parser_builds_assignment_ast_with_expected_counts_and_shape);
@@ -367,5 +411,7 @@ int main(void) {
     RUN_TEST(test_parser_parses_while_loop_body);
     RUN_TEST(test_parser_parses_for_loop_header_and_body);
     RUN_TEST(test_parser_parses_read_command_target);
+    RUN_TEST(test_parser_accepts_optional_top_level_procedures_before_program);
+    RUN_TEST(test_parser_accepts_void_call_command_and_return_without_expression);
     return UNITY_END();
 }
