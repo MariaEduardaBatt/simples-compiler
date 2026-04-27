@@ -242,7 +242,7 @@ static bool generate_store_int_to_name(CodegenContext *context, const char *name
 }
 
 /* Push an expression result onto the stack; optimise integer literals to push <N>. */
-static bool generate_push_expression(CodegenContext *context, const ASTExpression *expression);
+static bool generate_push_expression(CodegenContext *context, const ASTExpression *expression, CompilerError *error);
 
 static const char *symbol_name_at(const ASTProgram *program, const SymbolTable *symbols, size_t index) {
     if (symbols != NULL && symbols->names != NULL && index < symbols->count) {
@@ -365,6 +365,29 @@ static bool fail_float_procedure_codegen(CompilerError *error, int line, int col
         line,
         column,
         "Code generation for flutuante procedures is not supported yet.");
+    return false;
+}
+
+static bool fail_float_expression_codegen(CompilerError *error, int line, int column) {
+    compiler_error_set(
+        error,
+        COMPILER_PHASE_CODEGEN,
+        line,
+        column,
+        "Code generation for flutuante expressions is not supported yet.");
+    return false;
+}
+
+static bool fail_codegen_internal(CompilerError *error, int line, int column, const char *message) {
+    if (error != NULL && error->message[0] == '\0') {
+        compiler_error_set(
+            error,
+            COMPILER_PHASE_CODEGEN,
+            line,
+            column,
+            message != NULL ? message : "Internal error: code generation failed.");
+    }
+
     return false;
 }
 
@@ -511,7 +534,7 @@ static bool procedure_supports_integer_backend(const ASTProcedure *procedure, Co
     return true;
 }
 
-static bool generate_expression(CodegenContext *context, const ASTExpression *expression) {
+static bool generate_expression(CodegenContext *context, const ASTExpression *expression, CompilerError *error) {
     StringBuilder *builder = context->builder;
 
     if (expression == NULL) {
@@ -521,6 +544,8 @@ static bool generate_expression(CodegenContext *context, const ASTExpression *ex
     switch (expression->type) {
         case AST_EXPR_INT:
             return builder_appendf(builder, "    mov eax, %d\n", expression->int_value);
+        case AST_EXPR_FLOAT:
+            return fail_float_expression_codegen(error, expression->line, expression->column);
         case AST_EXPR_IDENTIFIER:
             return generate_load_name(context, expression->identifier);
         case AST_EXPR_CALL: {
@@ -528,7 +553,7 @@ static bool generate_expression(CodegenContext *context, const ASTExpression *ex
             size_t arg_i;
 
             for (arg_i = call->argument_count; arg_i > 0; arg_i--) {
-                if (!generate_push_expression(context, call->arguments[arg_i - 1])) {
+                if (!generate_push_expression(context, call->arguments[arg_i - 1], error)) {
                     return false;
                 }
             }
@@ -544,7 +569,7 @@ static bool generate_expression(CodegenContext *context, const ASTExpression *ex
             return true;
         }
         case AST_EXPR_UNARY:
-            if (!generate_expression(context, expression->unary.operand)) {
+            if (!generate_expression(context, expression->unary.operand, error)) {
                 return false;
             }
 
@@ -557,9 +582,9 @@ static bool generate_expression(CodegenContext *context, const ASTExpression *ex
                     return false;
             }
         case AST_EXPR_BINARY:
-            if (!generate_expression(context, expression->binary.left) ||
+            if (!generate_expression(context, expression->binary.left, error) ||
                 !builder_append(builder, "    push eax\n") ||
-                !generate_expression(context, expression->binary.right) ||
+                !generate_expression(context, expression->binary.right, error) ||
                 !builder_append(builder, "    mov ebx, eax\n") ||
                 !builder_append(builder, "    pop eax\n")) {
                 return false;
@@ -602,9 +627,10 @@ static bool generate_expression(CodegenContext *context, const ASTExpression *ex
     }
 }
 
-static bool generate_command_block(CodegenContext *context, const ASTCommand *commands, size_t command_count);
+static bool generate_command_block(
+    CodegenContext *context, const ASTCommand *commands, size_t command_count, CompilerError *error);
 
-static bool generate_command(CodegenContext *context, const ASTCommand *command) {
+static bool generate_command(CodegenContext *context, const ASTCommand *command, CompilerError *error) {
     StringBuilder *builder = context->builder;
 
     switch (command->type) {
@@ -614,16 +640,16 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command)
                                                   command->assignment.expression->int_value);
             }
 
-            return generate_expression(context, command->assignment.expression) &&
+            return generate_expression(context, command->assignment.expression, error) &&
                    generate_store_eax_to_name(context, command->assignment.name);
         case AST_COMMAND_READ:
             return builder_append(builder, "    call read_int\n") &&
                    generate_store_eax_to_name(context, command->read.name);
         case AST_COMMAND_WRITE:
-            return generate_expression(context, command->write.expression) &&
+            return generate_expression(context, command->write.expression, error) &&
                    builder_append(builder, "    call print_int\n");
         case AST_COMMAND_WRITELN:
-            return generate_expression(context, command->write.expression) &&
+            return generate_expression(context, command->write.expression, error) &&
                    builder_append(builder, "    call print_int\n") &&
                    builder_append(builder, "    call print_newline\n");
         case AST_COMMAND_CALL: {
@@ -631,7 +657,7 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command)
             size_t arg_i;
 
             for (arg_i = call->argument_count; arg_i > 0; arg_i--) {
-                if (!generate_push_expression(context, call->arguments[arg_i - 1])) {
+                if (!generate_push_expression(context, call->arguments[arg_i - 1], error)) {
                     return false;
                 }
             }
@@ -648,11 +674,15 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command)
         }
         case AST_COMMAND_RETURN:
             if (context->current_proc_name == NULL) {
-                return false;
+                return fail_codegen_internal(
+                    error,
+                    command->return_command.line,
+                    command->return_command.column,
+                    "Internal error: return command outside a procedure.");
             }
 
             if (command->return_command.expression != NULL &&
-                !generate_expression(context, command->return_command.expression)) {
+                !generate_expression(context, command->return_command.expression, error)) {
                 return false;
             }
 
@@ -660,51 +690,53 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command)
         case AST_COMMAND_IF: {
             size_t label_id = context->next_label_id++;
 
-            if (!generate_expression(context, command->if_command.condition) ||
+            if (!generate_expression(context, command->if_command.condition, error) ||
                 !builder_append(builder, "    cmp eax, 0\n")) {
                 return false;
             }
 
             if (command->if_command.else_count > 0) {
                 return builder_appendf(builder, "    je .Lelse%zu\n", label_id) &&
-                       generate_command_block(context, command->if_command.then_commands, command->if_command.then_count) &&
+                       generate_command_block(
+                           context, command->if_command.then_commands, command->if_command.then_count, error) &&
                        builder_appendf(builder, "    jmp .Lendif%zu\n", label_id) &&
                        builder_appendf(builder, ".Lelse%zu:\n", label_id) &&
-                       generate_command_block(context, command->if_command.else_commands, command->if_command.else_count) &&
+                       generate_command_block(
+                           context, command->if_command.else_commands, command->if_command.else_count, error) &&
                        builder_appendf(builder, ".Lendif%zu:\n", label_id);
             }
 
             return builder_appendf(builder, "    je .Lendif%zu\n", label_id) &&
-                   generate_command_block(context, command->if_command.then_commands, command->if_command.then_count) &&
+                   generate_command_block(context, command->if_command.then_commands, command->if_command.then_count, error) &&
                    builder_appendf(builder, ".Lendif%zu:\n", label_id);
         }
         case AST_COMMAND_WHILE: {
             size_t label_id = context->next_label_id++;
 
             return builder_appendf(builder, ".Lwhile%zu:\n", label_id) &&
-                   generate_expression(context, command->while_command.condition) &&
+                   generate_expression(context, command->while_command.condition, error) &&
                    builder_append(builder, "    cmp eax, 0\n") &&
                    builder_appendf(builder, "    je .Lendwhile%zu\n", label_id) &&
-                   generate_command_block(context, command->while_command.body_commands, command->while_command.body_count) &&
+                   generate_command_block(context, command->while_command.body_commands, command->while_command.body_count, error) &&
                    builder_appendf(builder, "    jmp .Lwhile%zu\n", label_id) &&
                    builder_appendf(builder, ".Lendwhile%zu:\n", label_id);
         }
         case AST_COMMAND_FOR: {
             size_t label_id = context->next_label_id++;
 
-            return generate_expression(context, command->for_command.start_expression) &&
+            return generate_expression(context, command->for_command.start_expression, error) &&
                    generate_store_eax_to_name(context, command->for_command.iterator_name) &&
-                   generate_expression(context, command->for_command.end_expression) &&
+                   generate_expression(context, command->for_command.end_expression, error) &&
                    builder_appendf(builder, "    mov dword [_for_end_%zu], eax\n", label_id) &&
-                   generate_expression(context, command->for_command.step_expression) &&
+                   generate_expression(context, command->for_command.step_expression, error) &&
                    builder_appendf(builder, "    mov dword [_for_step_%zu], eax\n", label_id) &&
                    builder_appendf(builder, ".Lfor%zu:\n", label_id) &&
                    builder_appendf(builder, "    mov eax, dword [_for_step_%zu]\n", label_id) &&
                    builder_append(builder, "    cmp eax, 0\n") &&
                    builder_appendf(builder, "    je .Lendfor%zu\n", label_id) &&
-                   builder_appendf(builder, "    jg .Lforpos%zu\n", label_id) &&
-                   generate_load_name(context, command->for_command.iterator_name) &&
-                   builder_appendf(builder, "    mov ebx, dword [_for_end_%zu]\n", label_id) &&
+                    builder_appendf(builder, "    jg .Lforpos%zu\n", label_id) &&
+                    generate_load_name(context, command->for_command.iterator_name) &&
+                    builder_appendf(builder, "    mov ebx, dword [_for_end_%zu]\n", label_id) &&
                    builder_append(builder, "    cmp eax, ebx\n") &&
                    builder_appendf(builder, "    jl .Lendfor%zu\n", label_id) &&
                    builder_appendf(builder, "    jmp .Lforbody%zu\n", label_id) &&
@@ -712,11 +744,11 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command)
                    generate_load_name(context, command->for_command.iterator_name) &&
                    builder_appendf(builder, "    mov ebx, dword [_for_end_%zu]\n", label_id) &&
                    builder_append(builder, "    cmp eax, ebx\n") &&
-                   builder_appendf(builder, "    jg .Lendfor%zu\n", label_id) &&
-                   builder_appendf(builder, ".Lforbody%zu:\n", label_id) &&
-                   generate_command_block(context, command->for_command.body_commands, command->for_command.body_count) &&
-                   generate_load_name(context, command->for_command.iterator_name) &&
-                   builder_appendf(builder, "    mov ebx, dword [_for_step_%zu]\n", label_id) &&
+                    builder_appendf(builder, "    jg .Lendfor%zu\n", label_id) &&
+                    builder_appendf(builder, ".Lforbody%zu:\n", label_id) &&
+                    generate_command_block(context, command->for_command.body_commands, command->for_command.body_count, error) &&
+                    generate_load_name(context, command->for_command.iterator_name) &&
+                    builder_appendf(builder, "    mov ebx, dword [_for_step_%zu]\n", label_id) &&
                    builder_append(builder, "    add eax, ebx\n") &&
                    generate_store_eax_to_name(context, command->for_command.iterator_name) &&
                    builder_appendf(builder, "    jmp .Lfor%zu\n", label_id) &&
@@ -727,11 +759,12 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command)
     }
 }
 
-static bool generate_command_block(CodegenContext *context, const ASTCommand *commands, size_t command_count) {
+static bool generate_command_block(
+    CodegenContext *context, const ASTCommand *commands, size_t command_count, CompilerError *error) {
     size_t index;
 
     for (index = 0; index < command_count; ++index) {
-        if (!generate_command(context, &commands[index])) {
+        if (!generate_command(context, &commands[index], error)) {
             return false;
         }
     }
@@ -739,17 +772,18 @@ static bool generate_command_block(CodegenContext *context, const ASTCommand *co
     return true;
 }
 
-static bool generate_push_expression(CodegenContext *context, const ASTExpression *expression) {
+static bool generate_push_expression(CodegenContext *context, const ASTExpression *expression, CompilerError *error) {
     if (expression->type == AST_EXPR_INT) {
         return builder_appendf(context->builder, "    push %d\n", expression->int_value);
     }
 
-    return generate_expression(context, expression) &&
+    return generate_expression(context, expression, error) &&
            builder_append(context->builder, "    push eax\n");
 }
 
 static bool generate_procedure(
-    const ASTProcedure *proc, StringBuilder *builder, const SizeList *for_loop_ids, size_t *next_label_id) {
+    const ASTProcedure *proc, StringBuilder *builder, const SizeList *for_loop_ids, size_t *next_label_id,
+    CompilerError *error) {
     CodegenContext context;
 
     if (!builder_appendf(builder, "\nproc_%s:\n", proc->name) ||
@@ -772,7 +806,7 @@ static bool generate_procedure(
     context.proc_locals = proc->local_declarations;
     context.proc_local_count = proc->local_declaration_count;
 
-    if (!generate_command_block(&context, proc->commands, proc->command_count)) {
+    if (!generate_command_block(&context, proc->commands, proc->command_count, error)) {
         return false;
     }
 
@@ -924,7 +958,7 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
     }
 
     if (program == NULL) {
-        return false;
+        return fail_codegen_internal(error, 0, 0, "Internal error: code generation failed.");
     }
 
     symbols = (semantic != NULL) ? &semantic->globals : NULL;
@@ -940,7 +974,7 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
 
     if (!collect_for_loop_ids_in_program(&for_loop_ids, &next_label_id, program)) {
         free(for_loop_ids.items);
-        return false;
+        return fail_codegen_internal(error, 0, 0, "Internal error: code generation failed.");
     }
 
     if (!builder_append(&builder, "global _start\n\nsection .data\n")) {
@@ -981,7 +1015,7 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
     context.proc_locals = NULL;
     context.proc_local_count = 0;
 
-    if (!generate_command_block(&context, program->commands, program->command_count)) {
+    if (!generate_command_block(&context, program->commands, program->command_count, error)) {
         goto fail;
     }
 
@@ -990,7 +1024,7 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
     }
 
     for (index = 0; index < program->procedure_count; index++) {
-        if (!generate_procedure(&program->procedures[index], &builder, &for_loop_ids, &context.next_label_id)) {
+        if (!generate_procedure(&program->procedures[index], &builder, &for_loop_ids, &context.next_label_id, error)) {
             goto fail;
         }
     }
@@ -1010,5 +1044,5 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
 fail:
     free(for_loop_ids.items);
     free(builder.data);
-    return false;
+    return fail_codegen_internal(error, 0, 0, "Internal error: code generation failed.");
 }

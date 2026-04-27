@@ -181,6 +181,49 @@ void test_codegen_returns_null_when_symbol_fallback_has_no_declarations(void) {
 
     TEST_ASSERT_FALSE(codegen_generate_program(&program, &semantic, &assembly, &error));
     TEST_ASSERT_NULL(assembly);
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Internal error: code generation failed.", error.message);
+}
+
+void test_codegen_reports_internal_error_for_return_outside_procedure(void) {
+    ASTCommand command = {0};
+    ASTProgram program = {.name = "demo", .commands = &command, .command_count = 1};
+    SemanticInfo semantic = {0};
+    char *assembly = NULL;
+    CompilerError error = {0};
+
+    command.type = AST_COMMAND_RETURN;
+    command.return_command.line = 12;
+    command.return_command.column = 34;
+
+    TEST_ASSERT_FALSE(codegen_generate_program(&program, &semantic, &assembly, &error));
+    TEST_ASSERT_NULL(assembly);
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Internal error: return command outside a procedure.", error.message);
+    TEST_ASSERT_EQUAL(12, error.line);
+    TEST_ASSERT_EQUAL(34, error.column);
+}
+
+void test_codegen_reports_float_expression_errors_in_main_body(void) {
+    CompilerError error = {0};
+    char *assembly = generate_source_with_error("programa demo inicio escreval 1.5; fim", &error);
+
+    TEST_ASSERT_NULL(assembly);
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Code generation for flutuante expressions is not supported yet.", error.message);
+}
+
+void test_codegen_sets_fallback_error_when_generation_fails_without_specific_diagnostic(void) {
+    ASTCommand command = {.type = (ASTCommandType)999};
+    ASTProgram program = {.name = "demo", .commands = &command, .command_count = 1};
+    SemanticInfo semantic = {0};
+    char *assembly = NULL;
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(codegen_generate_program(&program, &semantic, &assembly, &error));
+    TEST_ASSERT_NULL(assembly);
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Internal error: code generation failed.", error.message);
 }
 
 void test_codegen_emits_labels_and_jump_for_if_else(void) {
@@ -473,6 +516,9 @@ int main(void) {
     RUN_TEST(test_codegen_emits_unary_negation_and_logical_not_sequences);
     RUN_TEST(test_codegen_uses_program_declarations_when_symbol_names_are_missing);
     RUN_TEST(test_codegen_returns_null_when_symbol_fallback_has_no_declarations);
+    RUN_TEST(test_codegen_reports_internal_error_for_return_outside_procedure);
+    RUN_TEST(test_codegen_reports_float_expression_errors_in_main_body);
+    RUN_TEST(test_codegen_sets_fallback_error_when_generation_fails_without_specific_diagnostic);
     RUN_TEST(test_codegen_emits_labels_and_jump_for_if_else);
     RUN_TEST(test_codegen_emits_label_and_jump_for_if_without_else);
     RUN_TEST(test_codegen_emits_loop_labels_for_enquanto);
