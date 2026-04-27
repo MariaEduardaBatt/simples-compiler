@@ -114,7 +114,7 @@ int compile_file(const char *input_path, const char *output_path) {
     char *assembly = NULL;
     TokenList tokens = {0};
     ASTProgram *program = NULL;
-    SymbolTable symbols = {0};
+    SemanticInfo semantic_info = {0};
     CompilerError error = {0};
     int exit_code = 1;
 
@@ -134,12 +134,12 @@ int compile_file(const char *input_path, const char *output_path) {
         goto cleanup;
     }
 
-    if (!analyze_program(program, &symbols, &error)) {
+    if (!analyze_program(program, &semantic_info, &error)) {
         exit_code = report_error(&error);
         goto cleanup;
     }
 
-    assembly = codegen_generate_program(program, &symbols);
+    assembly = codegen_generate_program(program, &semantic_info.globals);
     if (assembly == NULL) {
         fprintf(stderr, "codegen:1:1: Falha na geracao de codigo.\n");
         goto cleanup;
@@ -153,7 +153,7 @@ int compile_file(const char *input_path, const char *output_path) {
 
 cleanup:
     free(assembly);
-    symbol_table_free(&symbols);
+    semantic_info_free(&semantic_info);
     ast_program_free(program);
     token_list_free(&tokens);
     free(source);

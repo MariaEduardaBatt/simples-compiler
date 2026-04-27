@@ -31,19 +31,19 @@ static char *generate_source(const char *source) {
     CompilerError error = {0};
     TokenList tokens;
     ASTProgram *program = NULL;
-    SymbolTable symbols = {0};
+    SemanticInfo info = {0};
     char *assembly = NULL;
 
     token_list_init(&tokens);
     TEST_ASSERT_TRUE(lexer_scan(source, &tokens, &error));
     TEST_ASSERT_TRUE(parse_program(&tokens, &program, &error));
     TEST_ASSERT_NOT_NULL(program);
-    TEST_ASSERT_TRUE(analyze_program(program, &symbols, &error));
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
 
-    assembly = codegen_generate_program(program, &symbols);
+    assembly = codegen_generate_program(program, &info.globals);
     TEST_ASSERT_NOT_NULL(assembly);
 
-    symbol_table_free(&symbols);
+    semantic_info_free(&info);
     ast_program_free(program);
     token_list_free(&tokens);
     return assembly;
