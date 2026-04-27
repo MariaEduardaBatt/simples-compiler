@@ -166,6 +166,20 @@ void test_lexer_scans_procedure_keywords_and_float_literals(void) {
     token_list_free(&tokens);
 }
 
+void test_lexer_scans_vazio_keyword(void) {
+    const char *source = "vazio";
+    TokenList tokens;
+    CompilerError error = {0};
+
+    token_list_init(&tokens);
+    TEST_ASSERT_TRUE(lexer_scan(source, &tokens, &error));
+    TEST_ASSERT_EQUAL_size_t(2, tokens.count);
+    assert_token(&tokens, 0, TOK_VAZIO, "vazio", 1, 1);
+    assert_token(&tokens, 1, TOK_EOF, "", 1, 6);
+
+    token_list_free(&tokens);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_lexer_scans_program_structure_into_expected_tokens);
@@ -176,5 +190,6 @@ int main(void) {
     RUN_TEST(test_lexer_resets_initialized_output_tokens_before_each_scan);
     RUN_TEST(test_lexer_scans_leia_statement);
     RUN_TEST(test_lexer_scans_procedure_keywords_and_float_literals);
+    RUN_TEST(test_lexer_scans_vazio_keyword);
     return UNITY_END();
 }
