@@ -10,6 +10,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+bool codegen_debug_resolve_procedure_for_loop_offsets(
+    size_t proc_local_count,
+    const size_t *procedure_for_loop_ids,
+    size_t procedure_for_loop_id_count,
+    size_t label_id,
+    size_t *end_offset,
+    size_t *step_offset,
+    CompilerError *error,
+    int line,
+    int column);
+
 void setUp(void) {}
 
 void tearDown(void) {}
@@ -202,6 +213,37 @@ void test_codegen_reports_internal_error_for_return_outside_procedure(void) {
     TEST_ASSERT_EQUAL_STRING("Internal error: return command outside a procedure.", error.message);
     TEST_ASSERT_EQUAL(12, error.line);
     TEST_ASSERT_EQUAL(34, error.column);
+}
+
+void test_codegen_reports_explicit_error_when_procedure_for_loop_slots_are_missing(void) {
+    CompilerError error = {0};
+    size_t end_offset = 123;
+    size_t step_offset = 456;
+
+    TEST_ASSERT_FALSE(codegen_debug_resolve_procedure_for_loop_offsets(
+        0, NULL, 0, 7, &end_offset, &step_offset, &error, 9, 11));
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
+    TEST_ASSERT_EQUAL_STRING(
+        "Internal error: missing procedure for-loop temporary slot metadata.", error.message);
+    TEST_ASSERT_EQUAL(9, error.line);
+    TEST_ASSERT_EQUAL(11, error.column);
+    TEST_ASSERT_EQUAL_size_t(123, end_offset);
+    TEST_ASSERT_EQUAL_size_t(456, step_offset);
+}
+
+void test_codegen_reports_explicit_error_when_procedure_for_loop_slot_layout_overflows(void) {
+    CompilerError error = {0};
+    size_t loop_ids[] = {3};
+    size_t end_offset = 0;
+    size_t step_offset = 0;
+
+    TEST_ASSERT_FALSE(codegen_debug_resolve_procedure_for_loop_offsets(
+        (size_t)-1, loop_ids, 1, 3, &end_offset, &step_offset, &error, 4, 8));
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
+    TEST_ASSERT_EQUAL_STRING(
+        "Internal error: invalid procedure-for-loop temporary slot layout.", error.message);
+    TEST_ASSERT_EQUAL(4, error.line);
+    TEST_ASSERT_EQUAL(8, error.column);
 }
 
 void test_codegen_reports_float_expression_errors_in_main_body(void) {
@@ -595,6 +637,8 @@ int main(void) {
     RUN_TEST(test_codegen_uses_program_declarations_when_symbol_names_are_missing);
     RUN_TEST(test_codegen_returns_null_when_symbol_fallback_has_no_declarations);
     RUN_TEST(test_codegen_reports_internal_error_for_return_outside_procedure);
+    RUN_TEST(test_codegen_reports_explicit_error_when_procedure_for_loop_slots_are_missing);
+    RUN_TEST(test_codegen_reports_explicit_error_when_procedure_for_loop_slot_layout_overflows);
     RUN_TEST(test_codegen_reports_float_expression_errors_in_main_body);
     RUN_TEST(test_codegen_rejects_float_read_in_main_body_with_explicit_error);
     RUN_TEST(test_codegen_rejects_float_assignment_via_identifier_in_main_body_with_explicit_error);

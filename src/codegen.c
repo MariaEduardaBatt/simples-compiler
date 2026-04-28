@@ -406,6 +406,44 @@ static bool fail_codegen_internal(CompilerError *error, int line, int column, co
     return false;
 }
 
+static bool resolve_procedure_for_loop_offsets(
+    size_t proc_local_count,
+    const SizeList *procedure_for_loop_ids,
+    size_t label_id,
+    size_t *end_offset,
+    size_t *step_offset,
+    CompilerError *error,
+    int line,
+    int column) {
+    size_t index;
+
+    if (procedure_for_loop_ids == NULL) {
+        return fail_codegen_internal(
+            error, line, column, "Internal error: missing procedure for-loop temporary slot metadata.");
+    }
+
+    for (index = 0; index < procedure_for_loop_ids->count; ++index) {
+        if (procedure_for_loop_ids->items[index] == label_id) {
+            if (end_offset != NULL) {
+                *end_offset = (proc_local_count + index * 2 + 1) * 4;
+            }
+            if (step_offset != NULL) {
+                *step_offset = (proc_local_count + index * 2 + 2) * 4;
+            }
+
+            if ((end_offset != NULL && *end_offset == 0) || (step_offset != NULL && *step_offset == 0)) {
+                return fail_codegen_internal(
+                    error, line, column, "Internal error: invalid procedure-for-loop temporary slot layout.");
+            }
+
+            return true;
+        }
+    }
+
+    return fail_codegen_internal(
+        error, line, column, "Internal error: missing procedure for-loop temporary slot mapping.");
+}
+
 static bool procedure_expression_supports_integer_backend(const ASTExpression *expression, CompilerError *error) {
     size_t index;
 
@@ -933,21 +971,15 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
             size_t step_offset = 0;
 
             if (context->current_proc_name != NULL) {
-                size_t index;
-
-                if (context->procedure_for_loop_ids == NULL) {
-                    return false;
-                }
-
-                for (index = 0; index < context->procedure_for_loop_ids->count; ++index) {
-                    if (context->procedure_for_loop_ids->items[index] == label_id) {
-                        end_offset = (context->proc_local_count + index * 2 + 1) * 4;
-                        step_offset = (context->proc_local_count + index * 2 + 2) * 4;
-                        break;
-                    }
-                }
-
-                if (end_offset == 0 || step_offset == 0) {
+                if (!resolve_procedure_for_loop_offsets(
+                        context->proc_local_count,
+                        context->procedure_for_loop_ids,
+                        label_id,
+                        &end_offset,
+                        &step_offset,
+                        error,
+                        command->for_command.line,
+                        command->for_command.column)) {
                     return false;
                 }
             }
@@ -1104,6 +1136,29 @@ static bool generate_procedure(
     free(procedure_for_loop_ids.items);
     return true;
 }
+
+#ifdef CODEGEN_TESTING
+bool codegen_debug_resolve_procedure_for_loop_offsets(
+    size_t proc_local_count,
+    const size_t *procedure_for_loop_ids,
+    size_t procedure_for_loop_id_count,
+    size_t label_id,
+    size_t *end_offset,
+    size_t *step_offset,
+    CompilerError *error,
+    int line,
+    int column) {
+    SizeList list = {
+        .items = (size_t *)procedure_for_loop_ids,
+        .count = procedure_for_loop_id_count,
+        .capacity = procedure_for_loop_id_count,
+    };
+
+    return resolve_procedure_for_loop_offsets(
+        proc_local_count, procedure_for_loop_ids != NULL ? &list : NULL, label_id, end_offset, step_offset, error, line,
+        column);
+}
+#endif
 
 static bool generate_helpers(StringBuilder *builder) {
     return builder_append(
