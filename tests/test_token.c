@@ -18,6 +18,14 @@ void test_token_type_name_returns_leia_name(void) {
     TEST_ASSERT_EQUAL_STRING("TOK_LEIA", token_type_name(TOK_LEIA));
 }
 
+void test_token_type_name_returns_procedure_and_float_names(void) {
+    TEST_ASSERT_EQUAL_STRING("TOK_FLUTUANTE", token_type_name(TOK_FLUTUANTE));
+    TEST_ASSERT_EQUAL_STRING("TOK_VAZIO", token_type_name(TOK_VAZIO));
+    TEST_ASSERT_EQUAL_STRING("TOK_PROCEDIMENTO", token_type_name(TOK_PROCEDIMENTO));
+    TEST_ASSERT_EQUAL_STRING("TOK_RETORNA", token_type_name(TOK_RETORNA));
+    TEST_ASSERT_EQUAL_STRING("TOK_NUM_FLOAT", token_type_name(TOK_NUM_FLOAT));
+}
+
 void test_token_list_grows_and_preserves_all_entries_after_growth(void) {
     TokenList list;
     char lexemes[][16] = {"alpha", "beta", "gamma", "delta", "epsilon"};
@@ -55,6 +63,7 @@ int main(void) {
     RUN_TEST(test_token_type_name_returns_keyword_name);
     RUN_TEST(test_token_type_name_returns_control_flow_name);
     RUN_TEST(test_token_type_name_returns_leia_name);
+    RUN_TEST(test_token_type_name_returns_procedure_and_float_names);
     RUN_TEST(test_token_list_grows_and_preserves_all_entries_after_growth);
     return UNITY_END();
 }

@@ -141,6 +141,45 @@ void test_lexer_scans_leia_statement(void) {
     token_list_free(&tokens);
 }
 
+void test_lexer_scans_procedure_keywords_and_float_literals(void) {
+    const char *source = "procedimento flutuante soma(flutuante x) inicio retorna 3.14; fim";
+    TokenList tokens;
+    CompilerError error = {0};
+
+    token_list_init(&tokens);
+    TEST_ASSERT_TRUE(lexer_scan(source, &tokens, &error));
+
+    assert_token(&tokens, 0, TOK_PROCEDIMENTO, "procedimento", 1, 1);
+    assert_token(&tokens, 1, TOK_FLUTUANTE, "flutuante", 1, 14);
+    assert_token(&tokens, 2, TOK_ID, "soma", 1, 24);
+    assert_token(&tokens, 3, TOK_ABRE_PAR, "(", 1, 28);
+    assert_token(&tokens, 4, TOK_FLUTUANTE, "flutuante", 1, 29);
+    assert_token(&tokens, 5, TOK_ID, "x", 1, 39);
+    assert_token(&tokens, 6, TOK_FECHA_PAR, ")", 1, 40);
+    assert_token(&tokens, 7, TOK_INICIO, "inicio", 1, 42);
+    assert_token(&tokens, 8, TOK_RETORNA, "retorna", 1, 49);
+    assert_token(&tokens, 9, TOK_NUM_FLOAT, "3.14", 1, 57);
+    assert_token(&tokens, 10, TOK_PONTO_VIRGULA, ";", 1, 61);
+    assert_token(&tokens, 11, TOK_FIM, "fim", 1, 63);
+    assert_token(&tokens, 12, TOK_EOF, "", 1, 66);
+
+    token_list_free(&tokens);
+}
+
+void test_lexer_scans_vazio_keyword(void) {
+    const char *source = "vazio";
+    TokenList tokens;
+    CompilerError error = {0};
+
+    token_list_init(&tokens);
+    TEST_ASSERT_TRUE(lexer_scan(source, &tokens, &error));
+    TEST_ASSERT_EQUAL_size_t(2, tokens.count);
+    assert_token(&tokens, 0, TOK_VAZIO, "vazio", 1, 1);
+    assert_token(&tokens, 1, TOK_EOF, "", 1, 6);
+
+    token_list_free(&tokens);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_lexer_scans_program_structure_into_expected_tokens);
@@ -150,5 +189,7 @@ int main(void) {
     RUN_TEST(test_lexer_accepts_zero_initialized_token_list);
     RUN_TEST(test_lexer_resets_initialized_output_tokens_before_each_scan);
     RUN_TEST(test_lexer_scans_leia_statement);
+    RUN_TEST(test_lexer_scans_procedure_keywords_and_float_literals);
+    RUN_TEST(test_lexer_scans_vazio_keyword);
     return UNITY_END();
 }
