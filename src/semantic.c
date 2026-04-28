@@ -488,6 +488,13 @@ static bool analyze_assignment_command(const ASTAssignmentCommand *assignment, c
         }
     }
 
+    if (assignment->target.type == AST_TARGET_IDENTIFIER
+            && variable_storage == AST_STORAGE_INDEXED
+            && variable_type != AST_TYPE_STRING) {
+        snprintf(message, sizeof(message), "Identificador '%s' nao pode ser usado como escalar.", target_name);
+        return semantic_fail_at(error, target_line, target_column, message);
+    }
+
     if (!analyze_expression(assignment->expression, ctx, &expression_type, error)) {
         return false;
     }

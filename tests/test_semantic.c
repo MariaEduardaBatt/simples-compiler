@@ -625,6 +625,46 @@ void test_semantic_rejects_vector_as_leia_target(void) {
     token_list_free(&tokens);
 }
 
+void test_semantic_rejects_vector_as_plain_assignment_target(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro nums[3];\n"
+        "inicio\n"
+        "  nums <- 5;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_SEMANTIC, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Identificador 'nums' nao pode ser usado como escalar.", error.message);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_accepts_string_plain_assignment(void) {
+    const char *source =
+        "programa demo\n"
+        "string nome[20];\n"
+        "inicio\n"
+        "  nome <- \"abc\";\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
 void test_semantic_rejects_indexed_procedure_parameter(void) {
     const char *source =
         "procedimento vazio p(inteiro nums[2])\n"
@@ -677,6 +717,8 @@ int main(void) {
     RUN_TEST(test_semantic_rejects_scalar_identifier_indexing_in_assignment_target);
     RUN_TEST(test_semantic_rejects_vector_in_write_expression);
     RUN_TEST(test_semantic_rejects_vector_as_leia_target);
+    RUN_TEST(test_semantic_rejects_vector_as_plain_assignment_target);
+    RUN_TEST(test_semantic_accepts_string_plain_assignment);
     RUN_TEST(test_semantic_rejects_indexed_procedure_parameter);
     return UNITY_END();
 }
