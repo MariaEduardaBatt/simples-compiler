@@ -436,7 +436,7 @@ static bool analyze_expression(const ASTExpression *expression, const SemanticCo
                     expression->index_access.index, error, "Indice deve ser do tipo 'inteiro'.");
             }
             if (out_type != NULL) {
-                *out_type = base_type;
+                *out_type = (base_type == AST_TYPE_STRING) ? AST_TYPE_INTEIRO : base_type;
             }
             return true;
         case AST_EXPR_CALL:
@@ -499,15 +499,31 @@ static bool analyze_assignment_command(const ASTAssignmentCommand *assignment, c
         return false;
     }
 
-    if (variable_type != expression_type) {
-        snprintf(
-            message,
-            sizeof(message),
-            "Variavel '%s' espera tipo '%s', mas recebeu '%s'.",
-            target_name,
-            semantic_type_name(variable_type),
-            semantic_type_name(expression_type));
-        return semantic_fail_expression(assignment->expression, error, message);
+    if (assignment->target.type == AST_TARGET_IDENTIFIER
+            && variable_type == AST_TYPE_STRING
+            && variable_storage == AST_STORAGE_INDEXED
+            && expression_type == AST_TYPE_STRING
+            && assignment->expression->type != AST_EXPR_STRING) {
+        return semantic_fail_expression(
+            assignment->expression, error, "Atribuicao de string para string nao suportada.");
+    }
+
+    {
+        ASTType effective_type = (assignment->target.type == AST_TARGET_INDEXED
+                && variable_type == AST_TYPE_STRING)
+            ? AST_TYPE_INTEIRO
+            : variable_type;
+
+        if (effective_type != expression_type) {
+            snprintf(
+                message,
+                sizeof(message),
+                "Variavel '%s' espera tipo '%s', mas recebeu '%s'.",
+                target_name,
+                semantic_type_name(effective_type),
+                semantic_type_name(expression_type));
+            return semantic_fail_expression(assignment->expression, error, message);
+        }
     }
 
     return true;

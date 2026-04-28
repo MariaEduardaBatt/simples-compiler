@@ -704,6 +704,68 @@ void test_semantic_accepts_string_in_write_expression(void) {
     token_list_free(&tokens);
 }
 
+void test_semantic_rejects_string_to_string_variable_assignment(void) {
+    const char *source =
+        "programa demo\n"
+        "string nome[20];\n"
+        "string outro[20];\n"
+        "inicio\n"
+        "  nome <- outro;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_SEMANTIC, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Atribuicao de string para string nao suportada.", error.message);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_accepts_string_element_integer_assignment(void) {
+    const char *source =
+        "programa demo\n"
+        "string nome[20];\n"
+        "inicio\n"
+        "  nome[0] <- 65;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_accepts_integer_read_from_string_element(void) {
+    const char *source =
+        "programa demo\n"
+        "string nome[20];\n"
+        "inteiro x;\n"
+        "inicio\n"
+        "  nome <- \"abc\";\n"
+        "  x <- nome[0];\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
 void test_semantic_rejects_indexed_procedure_parameter(void) {
     const char *source =
         "procedimento vazio p(inteiro nums[2])\n"
@@ -760,6 +822,9 @@ int main(void) {
     RUN_TEST(test_semantic_accepts_string_plain_assignment);
     RUN_TEST(test_semantic_accepts_string_leia_target);
     RUN_TEST(test_semantic_accepts_string_in_write_expression);
+    RUN_TEST(test_semantic_rejects_string_to_string_variable_assignment);
+    RUN_TEST(test_semantic_accepts_string_element_integer_assignment);
+    RUN_TEST(test_semantic_accepts_integer_read_from_string_element);
     RUN_TEST(test_semantic_rejects_indexed_procedure_parameter);
     return UNITY_END();
 }
