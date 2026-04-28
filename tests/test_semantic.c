@@ -665,6 +665,45 @@ void test_semantic_accepts_string_plain_assignment(void) {
     token_list_free(&tokens);
 }
 
+void test_semantic_accepts_string_leia_target(void) {
+    const char *source =
+        "programa demo\n"
+        "string nome[20];\n"
+        "inicio\n"
+        "  leia nome;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_accepts_string_in_write_expression(void) {
+    const char *source =
+        "programa demo\n"
+        "string nome[20];\n"
+        "inicio\n"
+        "  nome <- \"oi\";\n"
+        "  escreval nome;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
 void test_semantic_rejects_indexed_procedure_parameter(void) {
     const char *source =
         "procedimento vazio p(inteiro nums[2])\n"
@@ -719,6 +758,8 @@ int main(void) {
     RUN_TEST(test_semantic_rejects_vector_as_leia_target);
     RUN_TEST(test_semantic_rejects_vector_as_plain_assignment_target);
     RUN_TEST(test_semantic_accepts_string_plain_assignment);
+    RUN_TEST(test_semantic_accepts_string_leia_target);
+    RUN_TEST(test_semantic_accepts_string_in_write_expression);
     RUN_TEST(test_semantic_rejects_indexed_procedure_parameter);
     return UNITY_END();
 }

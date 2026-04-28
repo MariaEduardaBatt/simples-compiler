@@ -410,7 +410,7 @@ static bool analyze_expression(const ASTExpression *expression, const SemanticCo
                 snprintf(id_message, sizeof(id_message), "Identificador '%s' nao declarado.", expression->identifier);
                 return semantic_fail_at(error, expression->line, expression->column, id_message);
             }
-            if (identifier_storage == AST_STORAGE_INDEXED) {
+            if (identifier_storage == AST_STORAGE_INDEXED && identifier_type != AST_TYPE_STRING) {
                 snprintf(id_message, sizeof(id_message), "Identificador '%s' nao pode ser usado como escalar.", expression->identifier);
                 return semantic_fail_at(error, expression->line, expression->column, id_message);
             }
@@ -614,7 +614,7 @@ static bool analyze_command(
                 snprintf(read_message, sizeof(read_message), "Identificador '%s' nao declarado.", command->read.name);
                 return semantic_fail_at(error, command->read.line, command->read.column, read_message);
             }
-            if (read_storage == AST_STORAGE_INDEXED) {
+            if (read_storage == AST_STORAGE_INDEXED && read_type != AST_TYPE_STRING) {
                 snprintf(read_message, sizeof(read_message), "Identificador '%s' nao pode ser alvo de 'leia'.", command->read.name);
                 return semantic_fail_at(error, command->read.line, command->read.column, read_message);
             }
