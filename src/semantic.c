@@ -401,9 +401,24 @@ static bool analyze_expression(const ASTExpression *expression, const SemanticCo
                 *out_type = AST_TYPE_STRING;
             }
             return true;
-        case AST_EXPR_IDENTIFIER:
-            return semantic_check_identifier(
-                ctx->scope, expression->identifier, expression->line, expression->column, out_type, error);
+        case AST_EXPR_IDENTIFIER: {
+            ASTStorageKind identifier_storage;
+            ASTType identifier_type;
+            char id_message[256];
+
+            if (!typed_scope_lookup(ctx->scope, expression->identifier, &identifier_type, &identifier_storage)) {
+                snprintf(id_message, sizeof(id_message), "Identificador '%s' nao declarado.", expression->identifier);
+                return semantic_fail_at(error, expression->line, expression->column, id_message);
+            }
+            if (identifier_storage == AST_STORAGE_INDEXED) {
+                snprintf(id_message, sizeof(id_message), "Identificador '%s' nao pode ser usado como escalar.", expression->identifier);
+                return semantic_fail_at(error, expression->line, expression->column, id_message);
+            }
+            if (out_type != NULL) {
+                *out_type = identifier_type;
+            }
+            return true;
+        }
         case AST_EXPR_INDEX:
             if (!typed_scope_lookup(ctx->scope, expression->index_access.name, &base_type, &base_storage)) {
                 snprintf(message, sizeof(message), "Identificador '%s' nao declarado.", expression->index_access.name);
@@ -583,9 +598,21 @@ static bool analyze_command(
     switch (command->type) {
         case AST_COMMAND_ASSIGNMENT:
             return analyze_assignment_command(&command->assignment, ctx, error);
-        case AST_COMMAND_READ:
-            return semantic_check_identifier(
-                ctx->scope, command->read.name, command->read.line, command->read.column, NULL, error);
+        case AST_COMMAND_READ: {
+            ASTStorageKind read_storage;
+            ASTType read_type;
+            char read_message[256];
+
+            if (!typed_scope_lookup(ctx->scope, command->read.name, &read_type, &read_storage)) {
+                snprintf(read_message, sizeof(read_message), "Identificador '%s' nao declarado.", command->read.name);
+                return semantic_fail_at(error, command->read.line, command->read.column, read_message);
+            }
+            if (read_storage == AST_STORAGE_INDEXED) {
+                snprintf(read_message, sizeof(read_message), "Identificador '%s' nao pode ser alvo de 'leia'.", command->read.name);
+                return semantic_fail_at(error, command->read.line, command->read.column, read_message);
+            }
+            return true;
+        }
         case AST_COMMAND_WRITE:
         case AST_COMMAND_WRITELN:
             return analyze_expression(command->write.expression, ctx, NULL, error);
@@ -681,6 +708,13 @@ static bool analyze_procedure(const ASTProcedure *procedure, const SemanticInfo 
     for (index = 0; index < procedure->parameter_count; ++index) {
         if (typed_scope_contains(&scope, procedure->parameters[index].name)) {
             snprintf(message, sizeof(message), "Parametro '%s' ja declarado.", procedure->parameters[index].name);
+            typed_scope_free(&scope);
+            return semantic_fail_at(
+                error, procedure->parameters[index].line, procedure->parameters[index].column, message);
+        }
+
+        if (procedure->parameters[index].storage == AST_STORAGE_INDEXED) {
+            snprintf(message, sizeof(message), "Parametro '%s' nao pode ser vetor.", procedure->parameters[index].name);
             typed_scope_free(&scope);
             return semantic_fail_at(
                 error, procedure->parameters[index].line, procedure->parameters[index].column, message);

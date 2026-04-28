@@ -583,6 +583,70 @@ void test_semantic_rejects_scalar_identifier_indexing_in_assignment_target(void)
     token_list_free(&tokens);
 }
 
+void test_semantic_rejects_vector_in_write_expression(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro nums[3];\n"
+        "inicio\n"
+        "  escreval nums;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_SEMANTIC, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Identificador 'nums' nao pode ser usado como escalar.", error.message);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_rejects_vector_as_leia_target(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro nums[3];\n"
+        "inicio\n"
+        "  leia nums;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_SEMANTIC, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Identificador 'nums' nao pode ser alvo de 'leia'.", error.message);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_rejects_indexed_procedure_parameter(void) {
+    const char *source =
+        "procedimento vazio p(inteiro nums[2])\n"
+        "inicio\n"
+        "fim\n"
+        "programa demo\n"
+        "inicio\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_SEMANTIC, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Parametro 'nums' nao pode ser vetor.", error.message);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_semantic_rejects_duplicate_declarations);
@@ -611,5 +675,8 @@ int main(void) {
     RUN_TEST(test_semantic_rejects_string_without_capacity);
     RUN_TEST(test_semantic_rejects_scalar_identifier_indexing);
     RUN_TEST(test_semantic_rejects_scalar_identifier_indexing_in_assignment_target);
+    RUN_TEST(test_semantic_rejects_vector_in_write_expression);
+    RUN_TEST(test_semantic_rejects_vector_as_leia_target);
+    RUN_TEST(test_semantic_rejects_indexed_procedure_parameter);
     return UNITY_END();
 }

@@ -67,6 +67,8 @@ typedef struct {
 typedef struct {
     char *name;
     ASTType type;
+    ASTStorageKind storage;
+    size_t capacity;
     int line;
     int column;
 } ASTParameter;

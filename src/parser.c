@@ -823,8 +823,44 @@ static bool parse_parameter_list(Parser *parser, ASTParameter **parameters, size
             return parser_oom(parser, error);
         }
         parameter.type = parameter_type;
+        parameter.storage = AST_STORAGE_SCALAR;
         parameter.line = name_token->line;
         parameter.column = name_token->column;
+
+        if (parser_match(parser, TOK_ABRE_COL)) {
+            const Token *size_token;
+            long size_value;
+
+            if (!parser_expect(parser, TOK_NUM_INT, error, "Esperado tamanho inteiro do vetor.")) {
+                free(parameter.name);
+                ast_parameter_list_free(*parameters, *parameter_count);
+                *parameters = NULL;
+                *parameter_count = 0;
+                return false;
+            }
+
+            size_token = parser_previous(parser);
+            errno = 0;
+            size_value = strtol(size_token->lexeme, NULL, 10);
+            if (errno == ERANGE || size_value <= 0) {
+                free(parameter.name);
+                ast_parameter_list_free(*parameters, *parameter_count);
+                *parameters = NULL;
+                *parameter_count = 0;
+                return parser_fail_at(size_token, error, "Tamanho de vetor invalido.");
+            }
+
+            if (!parser_expect(parser, TOK_FECHA_COL, error, "Esperado ']'.")) {
+                free(parameter.name);
+                ast_parameter_list_free(*parameters, *parameter_count);
+                *parameters = NULL;
+                *parameter_count = 0;
+                return false;
+            }
+
+            parameter.storage = AST_STORAGE_INDEXED;
+            parameter.capacity = (size_t)size_value;
+        }
 
         if (!parser_append_parameter(parameters, parameter_count, parameter)) {
             free(parameter.name);
