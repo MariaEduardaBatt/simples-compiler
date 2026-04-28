@@ -187,12 +187,32 @@ void test_lexer_scans_string_keyword_brackets_and_literal(void) {
 
     token_list_init(&tokens);
     TEST_ASSERT_TRUE(lexer_scan(source, &tokens, &error));
+    TEST_ASSERT_EQUAL_size_t(10, tokens.count);
     assert_token(&tokens, 0, TOK_STRING, "string", 1, 1);
     assert_token(&tokens, 2, TOK_ABRE_COL, "[", 1, 12);
     assert_token(&tokens, 3, TOK_NUM_INT, "32", 1, 13);
     assert_token(&tokens, 4, TOK_FECHA_COL, "]", 1, 15);
     assert_token(&tokens, 6, TOK_ESCREVAL, "escreval", 1, 18);
     assert_token(&tokens, 7, TOK_STRING_LITERAL, "\"oi\"", 1, 27);
+    assert_token(&tokens, 9, TOK_EOF, "", 1, 32);
+    token_list_free(&tokens);
+}
+
+void test_lexer_reports_unterminated_string_literal_error(void) {
+    const char *source = "\"hello";
+    TokenList tokens;
+    CompilerError error = {0};
+    bool ok;
+
+    token_list_init(&tokens);
+    ok = lexer_scan(source, &tokens, &error);
+
+    TEST_ASSERT_FALSE(ok);
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_LEXER, error.phase);
+    TEST_ASSERT_EQUAL_INT(1, error.line);
+    TEST_ASSERT_EQUAL_INT(1, error.column);
+    TEST_ASSERT_EQUAL_STRING("Literal de string nao terminado.", error.message);
+
     token_list_free(&tokens);
 }
 
@@ -208,5 +228,6 @@ int main(void) {
     RUN_TEST(test_lexer_scans_procedure_keywords_and_float_literals);
     RUN_TEST(test_lexer_scans_vazio_keyword);
     RUN_TEST(test_lexer_scans_string_keyword_brackets_and_literal);
+    RUN_TEST(test_lexer_reports_unterminated_string_literal_error);
     return UNITY_END();
 }
