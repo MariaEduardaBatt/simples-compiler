@@ -31,7 +31,8 @@ typedef struct {
     const ASTParameter *parameters;
     size_t parameter_count;
     const ASTDeclaration *proc_locals;
-    size_t proc_local_count;
+    size_t proc_local_count;       /* number of local declarations (for iteration) */
+    size_t proc_local_slot_count;  /* total frame slots for locals (vectors expand to capacity) */
 } CodegenContext;
 
 static bool builder_reserve(StringBuilder *builder, size_t extra_length) {
@@ -157,6 +158,41 @@ static bool builder_append_user_symbol_declaration(StringBuilder *builder, const
            builder_append(builder, " dd 0\n");
 }
 
+/* Returns the number of frame slots a list of local declarations occupies.
+   Vector locals expand to capacity slots; scalars use 1. */
+static size_t compute_local_slot_count(const ASTDeclaration *locals, size_t count) {
+    size_t i, slots = 0;
+
+    for (i = 0; i < count; i++) {
+        slots += (locals[i].storage == AST_STORAGE_INDEXED) ? locals[i].capacity : 1;
+    }
+    return slots;
+}
+
+/* Returns the ebp-relative base offset (positive) for local declaration[target_index].
+   First slot is at ebp-4, subsequent slots at ebp-8, etc. */
+static size_t local_declaration_frame_offset(const ASTDeclaration *proc_locals, size_t target_index) {
+    size_t i, slot = 0;
+
+    for (i = 0; i < target_index; i++) {
+        slot += (proc_locals[i].storage == AST_STORAGE_INDEXED) ? proc_locals[i].capacity : 1;
+    }
+    return (slot + 1) * 4;
+}
+
+/* Returns the ebp-relative base offset of the named local, or 0 if not found. */
+static size_t local_declaration_base_offset_by_name(
+    const ASTDeclaration *proc_locals, size_t proc_local_count, const char *name) {
+    size_t i;
+
+    for (i = 0; i < proc_local_count; i++) {
+        if (strcmp(proc_locals[i].name, name) == 0) {
+            return local_declaration_frame_offset(proc_locals, i);
+        }
+    }
+    return 0;
+}
+
 static bool builder_append_load_identifier(StringBuilder *builder, const SizeList *for_loop_ids, const char *name) {
     return builder_append(builder, "    mov eax, dword [") &&
            builder_append_user_symbol_name(builder, for_loop_ids, name) &&
@@ -192,7 +228,8 @@ static bool generate_load_name(CodegenContext *context, const char *name) {
     if (context->proc_locals != NULL) {
         for (i = 0; i < context->proc_local_count; i++) {
             if (strcmp(context->proc_locals[i].name, name) == 0) {
-                return builder_appendf(context->builder, "    mov eax, dword [ebp-%zu]\n", 4 + i * 4);
+                return builder_appendf(context->builder, "    mov eax, dword [ebp-%zu]\n",
+                                       local_declaration_frame_offset(context->proc_locals, i));
             }
         }
     }
@@ -214,7 +251,8 @@ static bool generate_store_eax_to_name(CodegenContext *context, const char *name
     if (context->proc_locals != NULL) {
         for (i = 0; i < context->proc_local_count; i++) {
             if (strcmp(context->proc_locals[i].name, name) == 0) {
-                return builder_appendf(context->builder, "    mov dword [ebp-%zu], eax\n", 4 + i * 4);
+                return builder_appendf(context->builder, "    mov dword [ebp-%zu], eax\n",
+                                       local_declaration_frame_offset(context->proc_locals, i));
             }
         }
     }
@@ -236,7 +274,8 @@ static bool generate_store_int_to_name(CodegenContext *context, const char *name
     if (context->proc_locals != NULL) {
         for (i = 0; i < context->proc_local_count; i++) {
             if (strcmp(context->proc_locals[i].name, name) == 0) {
-                return builder_appendf(context->builder, "    mov dword [ebp-%zu], %d\n", 4 + i * 4, value);
+                return builder_appendf(context->builder, "    mov dword [ebp-%zu], %d\n",
+                                       local_declaration_frame_offset(context->proc_locals, i), value);
             }
         }
     }
@@ -274,6 +313,32 @@ static size_t symbol_count(const ASTProgram *program, const SymbolInfo *globals,
 
     if (program != NULL) {
         return program->declaration_count;
+    }
+
+    return 0;
+}
+
+static ASTStorageKind symbol_storage_at(
+    const ASTProgram *program, const SymbolInfo *globals, size_t global_count, size_t index) {
+    if (globals != NULL && index < global_count) {
+        return globals[index].storage;
+    }
+
+    if (program != NULL && program->declarations != NULL && index < program->declaration_count) {
+        return program->declarations[index].storage;
+    }
+
+    return AST_STORAGE_SCALAR;
+}
+
+static size_t symbol_capacity_at(
+    const ASTProgram *program, const SymbolInfo *globals, size_t global_count, size_t index) {
+    if (globals != NULL && index < global_count) {
+        return globals[index].capacity;
+    }
+
+    if (program != NULL && program->declarations != NULL && index < program->declaration_count) {
+        return program->declarations[index].capacity;
     }
 
     return 0;
@@ -469,6 +534,8 @@ static bool procedure_expression_supports_integer_backend(const ASTExpression *e
         case AST_EXPR_BINARY:
             return procedure_expression_supports_integer_backend(expression->binary.left, error) &&
                    procedure_expression_supports_integer_backend(expression->binary.right, error);
+        case AST_EXPR_INDEX:
+            return procedure_expression_supports_integer_backend(expression->index_access.index, error);
         default:
             compiler_error_set(
                 error,
@@ -554,6 +621,8 @@ static bool main_expression_supports_integer_backend(
         case AST_EXPR_BINARY:
             return main_expression_supports_integer_backend(expression->binary.left, program, semantic, error) &&
                    main_expression_supports_integer_backend(expression->binary.right, program, semantic, error);
+        case AST_EXPR_INDEX:
+            return main_expression_supports_integer_backend(expression->index_access.index, program, semantic, error);
         default:
             compiler_error_set(
                 error,
@@ -866,6 +935,31 @@ static bool generate_expression(CodegenContext *context, const ASTExpression *ex
                 default:
                     return false;
             }
+        case AST_EXPR_INDEX: {
+            const ASTIndexedAccess *access = &expression->index_access;
+            size_t base_offset;
+
+            /* Local vector: elements stored descending from ebp (nums[0]=ebp-N, nums[1]=ebp-N-4...) */
+            if (context->proc_locals != NULL) {
+                base_offset = local_declaration_base_offset_by_name(
+                    context->proc_locals, context->proc_local_count, access->name);
+                if (base_offset > 0) {
+                    return generate_expression(context, access->index, error) &&
+                           builder_append(builder, "    imul eax, 4\n") &&
+                           builder_append(builder, "    neg eax\n") &&
+                           builder_appendf(builder, "    lea edx, [ebp + eax - %zu]\n", base_offset) &&
+                           builder_append(builder, "    mov eax, dword [edx]\n");
+                }
+            }
+
+            /* Global vector: elements stored ascending from label address */
+            return generate_expression(context, access->index, error) &&
+                   builder_append(builder, "    imul eax, 4\n") &&
+                   builder_append(builder, "    lea edx, [") &&
+                   builder_append_user_symbol_name(builder, context->for_loop_ids, access->name) &&
+                   builder_append(builder, " + eax]\n") &&
+                   builder_append(builder, "    mov eax, dword [edx]\n");
+        }
         default:
             return false;
     }
@@ -880,13 +974,40 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
     switch (command->type) {
         case AST_COMMAND_ASSIGNMENT: {
             if (command->assignment.target.type == AST_TARGET_INDEXED) {
-                compiler_error_set(
-                    error,
-                    COMPILER_PHASE_CODEGEN,
-                    command->assignment.target.line,
-                    command->assignment.target.column,
-                    "Internal error: indexed assignment not yet supported by code generator.");
-                return false;
+                const ASTIndexedAccess *access = &command->assignment.target.indexed;
+                size_t base_offset;
+
+                /* Evaluate value first so address in edx is not clobbered by the expression. */
+                if (!generate_expression(context, command->assignment.expression, error)) {
+                    return false;
+                }
+                if (!builder_append(builder, "    push eax\n")) {
+                    return false;
+                }
+
+                if (context->proc_locals != NULL) {
+                    base_offset = local_declaration_base_offset_by_name(
+                        context->proc_locals, context->proc_local_count, access->name);
+                    if (base_offset > 0) {
+                        if (!generate_expression(context, access->index, error) ||
+                            !builder_append(builder, "    imul eax, 4\n") ||
+                            !builder_append(builder, "    neg eax\n") ||
+                            !builder_appendf(builder, "    lea edx, [ebp + eax - %zu]\n", base_offset)) {
+                            return false;
+                        }
+                        return builder_append(builder, "    pop eax\n") &&
+                               builder_append(builder, "    mov dword [edx], eax\n");
+                    }
+                }
+
+                /* Global vector */
+                return generate_expression(context, access->index, error) &&
+                       builder_append(builder, "    imul eax, 4\n") &&
+                       builder_append(builder, "    lea edx, [") &&
+                       builder_append_user_symbol_name(builder, context->for_loop_ids, access->name) &&
+                       builder_append(builder, " + eax]\n") &&
+                       builder_append(builder, "    pop eax\n") &&
+                       builder_append(builder, "    mov dword [edx], eax\n");
             }
 
             if (command->assignment.expression != NULL && command->assignment.expression->type == AST_EXPR_INT) {
@@ -983,7 +1104,7 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
 
             if (context->current_proc_name != NULL) {
                 if (!resolve_procedure_for_loop_offsets(
-                        context->proc_local_count,
+                        context->proc_local_slot_count,
                         context->procedure_for_loop_ids,
                         label_id,
                         &end_offset,
@@ -1086,6 +1207,7 @@ static bool generate_procedure(
     CodegenContext context;
     SizeList procedure_for_loop_ids = {0};
     size_t preview_next_label = next_label_id != NULL ? *next_label_id : 0;
+    size_t total_local_slots;
     size_t total_stack_slots = 0;
     size_t slot_index;
 
@@ -1095,7 +1217,8 @@ static bool generate_procedure(
         return false;
     }
 
-    total_stack_slots = proc->local_declaration_count + procedure_for_loop_ids.count * 2;
+    total_local_slots = compute_local_slot_count(proc->local_declarations, proc->local_declaration_count);
+    total_stack_slots = total_local_slots + procedure_for_loop_ids.count * 2;
 
     if (!builder_appendf(builder, "\nproc_%s:\n", proc->name) ||
         !builder_append(builder, "    push ebp\n    mov ebp, esp\n")) {
@@ -1128,6 +1251,7 @@ static bool generate_procedure(
     context.parameter_count = proc->parameter_count;
     context.proc_locals = proc->local_declarations;
     context.proc_local_count = proc->local_declaration_count;
+    context.proc_local_slot_count = total_local_slots;
 
     if (!generate_command_block(&context, proc->commands, proc->command_count, error)) {
         free(procedure_for_loop_ids.items);
@@ -1345,8 +1469,19 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
 
     for (index = 0; index < symbol_count(program, globals, global_count); ++index) {
         const char *name = symbol_name_at(program, globals, global_count, index);
+        ASTStorageKind storage = symbol_storage_at(program, globals, global_count, index);
+        size_t capacity = symbol_capacity_at(program, globals, global_count, index);
 
-        if (name == NULL || !builder_append_user_symbol_declaration(&builder, &for_loop_ids, name)) {
+        if (name == NULL) {
+            goto fail;
+        }
+
+        if (storage == AST_STORAGE_INDEXED && capacity > 0) {
+            if (!builder_append_user_symbol_name(&builder, &for_loop_ids, name) ||
+                !builder_appendf(&builder, " times %zu dd 0\n", capacity)) {
+                goto fail;
+            }
+        } else if (!builder_append_user_symbol_declaration(&builder, &for_loop_ids, name)) {
             goto fail;
         }
     }
@@ -1375,6 +1510,7 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
     context.parameter_count = 0;
     context.proc_locals = NULL;
     context.proc_local_count = 0;
+    context.proc_local_slot_count = 0;
 
     if (!generate_command_block(&context, program->commands, program->command_count, error)) {
         goto fail;

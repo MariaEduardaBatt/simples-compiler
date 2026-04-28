@@ -640,16 +640,47 @@ void test_codegen_rejects_indexed_assignment_target_with_internal_error(void) {
     command.assignment.target.column = 3;
     command.assignment.target.indexed.name = name;
     command.assignment.target.indexed.index = &index_expr;
-    command.assignment.expression = NULL;
+    command.assignment.expression = NULL; /* NULL expression forces generation failure */
 
     TEST_ASSERT_FALSE(codegen_generate_program(&program, &semantic, &assembly, &error));
     TEST_ASSERT_NULL(assembly);
     TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
-    TEST_ASSERT_EQUAL_STRING(
-        "Internal error: indexed assignment not yet supported by code generator.",
-        error.message);
-    TEST_ASSERT_EQUAL(1, error.line);
-    TEST_ASSERT_EQUAL(3, error.column);
+    TEST_ASSERT_EQUAL_STRING("Internal error: code generation failed.", error.message);
+    TEST_ASSERT_EQUAL(0, error.line);
+    TEST_ASSERT_EQUAL(0, error.column);
+}
+
+void test_codegen_emits_scaled_addressing_for_global_integer_vector_element(void) {
+    char *assembly = generate_source(
+        "programa demo\n"
+        "inteiro nums[4], x;\n"
+        "inicio\n"
+        "  nums[1] <- 42;\n"
+        "  x <- nums[1];\n"
+        "fim");
+
+    assert_contains(assembly, "imul eax, 4");
+    assert_contains(assembly, "lea edx, [nums + eax]");
+    free(assembly);
+}
+
+void test_codegen_zero_initializes_local_integer_vector_storage(void) {
+    char *assembly = generate_source(
+        "procedimento vazio limpa()\n"
+        "inicio\n"
+        "  inteiro nums[3];\n"
+        "  retorna;\n"
+        "fim\n"
+        "programa demo\n"
+        "inicio\n"
+        "  limpa();\n"
+        "fim");
+
+    assert_contains(assembly, "sub esp, 12");
+    assert_contains(assembly, "mov dword [ebp-4], 0");
+    assert_contains(assembly, "mov dword [ebp-8], 0");
+    assert_contains(assembly, "mov dword [ebp-12], 0");
+    free(assembly);
 }
 
 int main(void) {
@@ -691,5 +722,7 @@ int main(void) {
     RUN_TEST(test_codegen_zero_initializes_procedure_locals_on_entry);
     RUN_TEST(test_codegen_assigns_distinct_frame_slots_for_multiple_procedure_for_loops);
     RUN_TEST(test_codegen_rejects_indexed_assignment_target_with_internal_error);
+    RUN_TEST(test_codegen_emits_scaled_addressing_for_global_integer_vector_element);
+    RUN_TEST(test_codegen_zero_initializes_local_integer_vector_storage);
     return UNITY_END();
 }
