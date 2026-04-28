@@ -22,7 +22,10 @@ typedef struct {
 typedef struct {
     StringBuilder *builder;
     const SizeList *for_loop_ids;
+    const SizeList *procedure_for_loop_ids;
     size_t next_label_id;
+    const ASTProgram *program;
+    const SemanticInfo *semantic;
     /* procedure context (NULL when generating main program) */
     const char *current_proc_name;
     const ASTParameter *parameters;
@@ -290,6 +293,8 @@ static bool builder_append_booleanize(StringBuilder *builder, const char *regist
 
 static bool collect_for_loop_ids_in_block(SizeList *for_loop_ids, size_t *next_label_id, const ASTCommand *commands, size_t command_count);
 static bool procedure_supports_integer_backend(const ASTProcedure *procedure, CompilerError *error);
+static bool main_program_supports_integer_backend(
+    const ASTProgram *program, const SemanticInfo *semantic, CompilerError *error);
 static bool collect_for_loop_ids_in_program(
     SizeList *for_loop_ids, size_t *next_label_id, const ASTProgram *program);
 
@@ -378,6 +383,16 @@ static bool fail_float_expression_codegen(CompilerError *error, int line, int co
     return false;
 }
 
+static bool fail_float_main_codegen(CompilerError *error, int line, int column) {
+    compiler_error_set(
+        error,
+        COMPILER_PHASE_CODEGEN,
+        line,
+        column,
+        "Code generation for flutuante values in the main program is not supported yet.");
+    return false;
+}
+
 static bool fail_codegen_internal(CompilerError *error, int line, int column, const char *message) {
     if (error != NULL && error->message[0] == '\0') {
         compiler_error_set(
@@ -425,6 +440,197 @@ static bool procedure_expression_supports_integer_backend(const ASTExpression *e
                 "Internal error: unsupported expression type in procedure backend check.");
             return false;
     }
+}
+
+static bool find_global_declaration_type(const ASTProgram *program, const char *name, ASTType *out_type) {
+    size_t index;
+
+    if (program == NULL || name == NULL) {
+        return false;
+    }
+
+    for (index = 0; index < program->declaration_count; ++index) {
+        if (strcmp(program->declarations[index].name, name) == 0) {
+            if (out_type != NULL) {
+                *out_type = program->declarations[index].type;
+            }
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool find_procedure_signature_type(
+    const SemanticInfo *semantic, const char *name, ASTType *out_return_type) {
+    size_t index;
+
+    if (semantic == NULL || name == NULL) {
+        return false;
+    }
+
+    for (index = 0; index < semantic->procedure_count; ++index) {
+        if (strcmp(semantic->procedures[index].name, name) == 0) {
+            if (out_return_type != NULL) {
+                *out_return_type = semantic->procedures[index].return_type;
+            }
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool main_expression_supports_integer_backend(
+    const ASTExpression *expression, const ASTProgram *program, const SemanticInfo *semantic, CompilerError *error) {
+    ASTType type;
+    size_t index;
+
+    if (expression == NULL) {
+        return true;
+    }
+
+    switch (expression->type) {
+        case AST_EXPR_INT:
+            return true;
+        case AST_EXPR_FLOAT:
+            return fail_float_expression_codegen(error, expression->line, expression->column);
+        case AST_EXPR_IDENTIFIER:
+            if (find_global_declaration_type(program, expression->identifier, &type) && type == AST_TYPE_FLUTUANTE) {
+                return fail_float_main_codegen(error, expression->line, expression->column);
+            }
+            return true;
+        case AST_EXPR_CALL:
+            for (index = 0; index < expression->call.argument_count; ++index) {
+                if (!main_expression_supports_integer_backend(expression->call.arguments[index], program, semantic, error)) {
+                    return false;
+                }
+            }
+
+            if (find_procedure_signature_type(semantic, expression->call.name, &type) && type == AST_TYPE_FLUTUANTE) {
+                return fail_float_main_codegen(error, expression->line, expression->column);
+            }
+            return true;
+        case AST_EXPR_UNARY:
+            return main_expression_supports_integer_backend(expression->unary.operand, program, semantic, error);
+        case AST_EXPR_BINARY:
+            return main_expression_supports_integer_backend(expression->binary.left, program, semantic, error) &&
+                   main_expression_supports_integer_backend(expression->binary.right, program, semantic, error);
+        default:
+            compiler_error_set(
+                error,
+                COMPILER_PHASE_CODEGEN,
+                expression->line,
+                expression->column,
+                "Internal error: unsupported expression type in main backend check.");
+            return false;
+    }
+}
+
+static bool main_command_supports_integer_backend(
+    const ASTCommand *command, const ASTProgram *program, const SemanticInfo *semantic, CompilerError *error) {
+    ASTType type;
+    size_t index;
+
+    if (command == NULL) {
+        return true;
+    }
+
+    switch (command->type) {
+        case AST_COMMAND_ASSIGNMENT:
+            if (find_global_declaration_type(program, command->assignment.name, &type) && type == AST_TYPE_FLUTUANTE) {
+                return fail_float_main_codegen(error, command->assignment.line, command->assignment.column);
+            }
+            return main_expression_supports_integer_backend(command->assignment.expression, program, semantic, error);
+        case AST_COMMAND_READ:
+            if (find_global_declaration_type(program, command->read.name, &type) && type == AST_TYPE_FLUTUANTE) {
+                return fail_float_main_codegen(error, command->read.line, command->read.column);
+            }
+            return true;
+        case AST_COMMAND_WRITE:
+        case AST_COMMAND_WRITELN:
+            return main_expression_supports_integer_backend(command->write.expression, program, semantic, error);
+        case AST_COMMAND_CALL:
+            for (index = 0; index < command->call_command.call.argument_count; ++index) {
+                if (!main_expression_supports_integer_backend(
+                        command->call_command.call.arguments[index], program, semantic, error)) {
+                    return false;
+                }
+            }
+            return true;
+        case AST_COMMAND_RETURN:
+            return true;
+        case AST_COMMAND_IF:
+            if (!main_expression_supports_integer_backend(command->if_command.condition, program, semantic, error)) {
+                return false;
+            }
+            for (index = 0; index < command->if_command.then_count; ++index) {
+                if (!main_command_supports_integer_backend(
+                        &command->if_command.then_commands[index], program, semantic, error)) {
+                    return false;
+                }
+            }
+            for (index = 0; index < command->if_command.else_count; ++index) {
+                if (!main_command_supports_integer_backend(
+                        &command->if_command.else_commands[index], program, semantic, error)) {
+                    return false;
+                }
+            }
+            return true;
+        case AST_COMMAND_WHILE:
+            if (!main_expression_supports_integer_backend(command->while_command.condition, program, semantic, error)) {
+                return false;
+            }
+            for (index = 0; index < command->while_command.body_count; ++index) {
+                if (!main_command_supports_integer_backend(
+                        &command->while_command.body_commands[index], program, semantic, error)) {
+                    return false;
+                }
+            }
+            return true;
+        case AST_COMMAND_FOR:
+            if (find_global_declaration_type(program, command->for_command.iterator_name, &type) &&
+                type == AST_TYPE_FLUTUANTE) {
+                return fail_float_main_codegen(error, command->for_command.line, command->for_command.column);
+            }
+            if (!main_expression_supports_integer_backend(command->for_command.start_expression, program, semantic, error) ||
+                !main_expression_supports_integer_backend(command->for_command.end_expression, program, semantic, error) ||
+                !main_expression_supports_integer_backend(command->for_command.step_expression, program, semantic, error)) {
+                return false;
+            }
+            for (index = 0; index < command->for_command.body_count; ++index) {
+                if (!main_command_supports_integer_backend(
+                        &command->for_command.body_commands[index], program, semantic, error)) {
+                    return false;
+                }
+            }
+            return true;
+        default:
+            compiler_error_set(
+                error,
+                COMPILER_PHASE_CODEGEN,
+                0,
+                0,
+                "Internal error: unsupported command type in main backend check.");
+            return false;
+    }
+}
+
+static bool main_program_supports_integer_backend(
+    const ASTProgram *program, const SemanticInfo *semantic, CompilerError *error) {
+    size_t index;
+
+    if (program == NULL) {
+        return false;
+    }
+
+    for (index = 0; index < program->command_count; ++index) {
+        if (!main_command_supports_integer_backend(&program->commands[index], program, semantic, error)) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 static bool procedure_command_supports_integer_backend(const ASTCommand *command, CompilerError *error) {
@@ -723,32 +929,82 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
         }
         case AST_COMMAND_FOR: {
             size_t label_id = context->next_label_id++;
+            size_t end_offset = 0;
+            size_t step_offset = 0;
 
-            return generate_expression(context, command->for_command.start_expression, error) &&
-                   generate_store_eax_to_name(context, command->for_command.iterator_name) &&
-                   generate_expression(context, command->for_command.end_expression, error) &&
-                   builder_appendf(builder, "    mov dword [_for_end_%zu], eax\n", label_id) &&
-                   generate_expression(context, command->for_command.step_expression, error) &&
-                   builder_appendf(builder, "    mov dword [_for_step_%zu], eax\n", label_id) &&
-                   builder_appendf(builder, ".Lfor%zu:\n", label_id) &&
-                   builder_appendf(builder, "    mov eax, dword [_for_step_%zu]\n", label_id) &&
+            if (context->current_proc_name != NULL) {
+                size_t index;
+
+                if (context->procedure_for_loop_ids == NULL) {
+                    return false;
+                }
+
+                for (index = 0; index < context->procedure_for_loop_ids->count; ++index) {
+                    if (context->procedure_for_loop_ids->items[index] == label_id) {
+                        end_offset = (context->proc_local_count + index * 2 + 1) * 4;
+                        step_offset = (context->proc_local_count + index * 2 + 2) * 4;
+                        break;
+                    }
+                }
+
+                if (end_offset == 0 || step_offset == 0) {
+                    return false;
+                }
+            }
+
+            if (!generate_expression(context, command->for_command.start_expression, error) ||
+                !generate_store_eax_to_name(context, command->for_command.iterator_name) ||
+                !generate_expression(context, command->for_command.end_expression, error)) {
+                return false;
+            }
+
+            if (context->current_proc_name != NULL) {
+                if (!builder_appendf(builder, "    mov dword [ebp-%zu], eax\n", end_offset)) {
+                    return false;
+                }
+            } else if (!builder_appendf(builder, "    mov dword [_for_end_%zu], eax\n", label_id)) {
+                return false;
+            }
+
+            if (!generate_expression(context, command->for_command.step_expression, error)) {
+                return false;
+            }
+
+            if (context->current_proc_name != NULL) {
+                if (!builder_appendf(builder, "    mov dword [ebp-%zu], eax\n", step_offset)) {
+                    return false;
+                }
+            } else if (!builder_appendf(builder, "    mov dword [_for_step_%zu], eax\n", label_id)) {
+                return false;
+            }
+
+            return builder_appendf(builder, ".Lfor%zu:\n", label_id) &&
+                   (context->current_proc_name != NULL
+                        ? builder_appendf(builder, "    mov eax, dword [ebp-%zu]\n", step_offset)
+                        : builder_appendf(builder, "    mov eax, dword [_for_step_%zu]\n", label_id)) &&
                    builder_append(builder, "    cmp eax, 0\n") &&
                    builder_appendf(builder, "    je .Lendfor%zu\n", label_id) &&
-                    builder_appendf(builder, "    jg .Lforpos%zu\n", label_id) &&
-                    generate_load_name(context, command->for_command.iterator_name) &&
-                    builder_appendf(builder, "    mov ebx, dword [_for_end_%zu]\n", label_id) &&
+                   builder_appendf(builder, "    jg .Lforpos%zu\n", label_id) &&
+                   generate_load_name(context, command->for_command.iterator_name) &&
+                   (context->current_proc_name != NULL
+                        ? builder_appendf(builder, "    mov ebx, dword [ebp-%zu]\n", end_offset)
+                        : builder_appendf(builder, "    mov ebx, dword [_for_end_%zu]\n", label_id)) &&
                    builder_append(builder, "    cmp eax, ebx\n") &&
                    builder_appendf(builder, "    jl .Lendfor%zu\n", label_id) &&
                    builder_appendf(builder, "    jmp .Lforbody%zu\n", label_id) &&
                    builder_appendf(builder, ".Lforpos%zu:\n", label_id) &&
                    generate_load_name(context, command->for_command.iterator_name) &&
-                   builder_appendf(builder, "    mov ebx, dword [_for_end_%zu]\n", label_id) &&
+                   (context->current_proc_name != NULL
+                        ? builder_appendf(builder, "    mov ebx, dword [ebp-%zu]\n", end_offset)
+                        : builder_appendf(builder, "    mov ebx, dword [_for_end_%zu]\n", label_id)) &&
                    builder_append(builder, "    cmp eax, ebx\n") &&
-                    builder_appendf(builder, "    jg .Lendfor%zu\n", label_id) &&
-                    builder_appendf(builder, ".Lforbody%zu:\n", label_id) &&
-                    generate_command_block(context, command->for_command.body_commands, command->for_command.body_count, error) &&
-                    generate_load_name(context, command->for_command.iterator_name) &&
-                    builder_appendf(builder, "    mov ebx, dword [_for_step_%zu]\n", label_id) &&
+                   builder_appendf(builder, "    jg .Lendfor%zu\n", label_id) &&
+                   builder_appendf(builder, ".Lforbody%zu:\n", label_id) &&
+                   generate_command_block(context, command->for_command.body_commands, command->for_command.body_count, error) &&
+                   generate_load_name(context, command->for_command.iterator_name) &&
+                   (context->current_proc_name != NULL
+                        ? builder_appendf(builder, "    mov ebx, dword [ebp-%zu]\n", step_offset)
+                        : builder_appendf(builder, "    mov ebx, dword [_for_step_%zu]\n", label_id)) &&
                    builder_append(builder, "    add eax, ebx\n") &&
                    generate_store_eax_to_name(context, command->for_command.iterator_name) &&
                    builder_appendf(builder, "    jmp .Lfor%zu\n", label_id) &&
@@ -785,21 +1041,45 @@ static bool generate_procedure(
     const ASTProcedure *proc, StringBuilder *builder, const SizeList *for_loop_ids, size_t *next_label_id,
     CompilerError *error) {
     CodegenContext context;
+    SizeList procedure_for_loop_ids = {0};
+    size_t preview_next_label = next_label_id != NULL ? *next_label_id : 0;
+    size_t total_stack_slots = 0;
+    size_t slot_index;
 
-    if (!builder_appendf(builder, "\nproc_%s:\n", proc->name) ||
-        !builder_append(builder, "    push ebp\n    mov ebp, esp\n")) {
+    if (!collect_for_loop_ids_in_block(
+            &procedure_for_loop_ids, &preview_next_label, proc->commands, proc->command_count)) {
+        free(procedure_for_loop_ids.items);
         return false;
     }
 
-    if (proc->local_declaration_count > 0) {
-        if (!builder_appendf(builder, "    sub esp, %zu\n", proc->local_declaration_count * 4)) {
+    total_stack_slots = proc->local_declaration_count + procedure_for_loop_ids.count * 2;
+
+    if (!builder_appendf(builder, "\nproc_%s:\n", proc->name) ||
+        !builder_append(builder, "    push ebp\n    mov ebp, esp\n")) {
+        free(procedure_for_loop_ids.items);
+        return false;
+    }
+
+    if (total_stack_slots > 0) {
+        if (!builder_appendf(builder, "    sub esp, %zu\n", total_stack_slots * 4)) {
+            free(procedure_for_loop_ids.items);
             return false;
+        }
+
+        for (slot_index = 0; slot_index < total_stack_slots; ++slot_index) {
+            if (!builder_appendf(builder, "    mov dword [ebp-%zu], 0\n", (slot_index + 1) * 4)) {
+                free(procedure_for_loop_ids.items);
+                return false;
+            }
         }
     }
 
     context.builder = builder;
     context.for_loop_ids = for_loop_ids;
+    context.procedure_for_loop_ids = &procedure_for_loop_ids;
     context.next_label_id = next_label_id != NULL ? *next_label_id : 0;
+    context.program = NULL;
+    context.semantic = NULL;
     context.current_proc_name = proc->name;
     context.parameters = proc->parameters;
     context.parameter_count = proc->parameter_count;
@@ -807,6 +1087,7 @@ static bool generate_procedure(
     context.proc_local_count = proc->local_declaration_count;
 
     if (!generate_command_block(&context, proc->commands, proc->command_count, error)) {
+        free(procedure_for_loop_ids.items);
         return false;
     }
 
@@ -816,9 +1097,11 @@ static bool generate_procedure(
 
     if (!builder_appendf(builder, ".proc_%s_epilogue:\n", proc->name) ||
         !builder_append(builder, "    mov esp, ebp\n    pop ebp\n    ret\n")) {
+        free(procedure_for_loop_ids.items);
         return false;
     }
 
+    free(procedure_for_loop_ids.items);
     return true;
 }
 
@@ -948,6 +1231,7 @@ static bool generate_helpers(StringBuilder *builder) {
 bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *semantic, char **out_assembly, CompilerError *error) {
     StringBuilder builder = {0};
     SizeList for_loop_ids = {0};
+    SizeList main_for_loop_ids = {0};
     CodegenContext context;
     const SymbolTable *symbols;
     size_t index;
@@ -972,7 +1256,17 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
         }
     }
 
+    if (!main_program_supports_integer_backend(program, semantic, error)) {
+        return false;
+    }
+
     if (!collect_for_loop_ids_in_program(&for_loop_ids, &next_label_id, program)) {
+        free(for_loop_ids.items);
+        return fail_codegen_internal(error, 0, 0, "Internal error: code generation failed.");
+    }
+
+    if (!collect_for_loop_ids_in_block(&main_for_loop_ids, &(size_t){0}, program->commands, program->command_count)) {
+        free(main_for_loop_ids.items);
         free(for_loop_ids.items);
         return fail_codegen_internal(error, 0, 0, "Internal error: code generation failed.");
     }
@@ -989,13 +1283,9 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
         }
     }
 
-    for (index = 0; index < for_loop_ids.count; ++index) {
-        size_t label_id = for_loop_ids.items[index];
+    for (index = 0; index < main_for_loop_ids.count; ++index) {
+        size_t label_id = main_for_loop_ids.items[index];
 
-        /*
-         * These temporaries live in .data, so procedure for-loops are not re-entrant.
-         * A recursive procedure that executes a for-loop will overwrite its own bounds.
-         */
         if (!builder_appendf(&builder, "_for_end_%zu dd 0\n", label_id) ||
             !builder_appendf(&builder, "_for_step_%zu dd 0\n", label_id)) {
             goto fail;
@@ -1008,7 +1298,10 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
 
     context.builder = &builder;
     context.for_loop_ids = &for_loop_ids;
+    context.procedure_for_loop_ids = NULL;
     context.next_label_id = 0;
+    context.program = program;
+    context.semantic = semantic;
     context.current_proc_name = NULL;
     context.parameters = NULL;
     context.parameter_count = 0;
@@ -1033,6 +1326,7 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
         goto fail;
     }
 
+    free(main_for_loop_ids.items);
     free(for_loop_ids.items);
     if (out_assembly != NULL) {
         *out_assembly = builder.data;
@@ -1042,6 +1336,7 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
     return true;
 
 fail:
+    free(main_for_loop_ids.items);
     free(for_loop_ids.items);
     free(builder.data);
     return fail_codegen_internal(error, 0, 0, "Internal error: code generation failed.");

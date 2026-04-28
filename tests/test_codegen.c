@@ -213,6 +213,33 @@ void test_codegen_reports_float_expression_errors_in_main_body(void) {
     TEST_ASSERT_EQUAL_STRING("Code generation for flutuante expressions is not supported yet.", error.message);
 }
 
+void test_codegen_rejects_float_read_in_main_body_with_explicit_error(void) {
+    CompilerError error = {0};
+    char *assembly = generate_source_with_error("programa demo flutuante x; inicio leia x; fim", &error);
+
+    TEST_ASSERT_NULL(assembly);
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Code generation for flutuante values in the main program is not supported yet.", error.message);
+}
+
+void test_codegen_rejects_float_assignment_via_identifier_in_main_body_with_explicit_error(void) {
+    CompilerError error = {0};
+    char *assembly = generate_source_with_error("programa demo flutuante x, y; inicio x <- y; fim", &error);
+
+    TEST_ASSERT_NULL(assembly);
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Code generation for flutuante values in the main program is not supported yet.", error.message);
+}
+
+void test_codegen_rejects_float_write_via_identifier_in_main_body_with_explicit_error(void) {
+    CompilerError error = {0};
+    char *assembly = generate_source_with_error("programa demo flutuante x; inicio escreval x; fim", &error);
+
+    TEST_ASSERT_NULL(assembly);
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Code generation for flutuante values in the main program is not supported yet.", error.message);
+}
+
 void test_codegen_sets_fallback_error_when_generation_fails_without_specific_diagnostic(void) {
     ASTCommand command = {.type = (ASTCommandType)999};
     ASTProgram program = {.name = "demo", .commands = &command, .command_count = 1};
@@ -223,7 +250,7 @@ void test_codegen_sets_fallback_error_when_generation_fails_without_specific_dia
     TEST_ASSERT_FALSE(codegen_generate_program(&program, &semantic, &assembly, &error));
     TEST_ASSERT_NULL(assembly);
     TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
-    TEST_ASSERT_EQUAL_STRING("Internal error: code generation failed.", error.message);
+    TEST_ASSERT_EQUAL_STRING("Internal error: unsupported command type in main backend check.", error.message);
 }
 
 void test_codegen_emits_labels_and_jump_for_if_else(void) {
@@ -484,7 +511,7 @@ void test_codegen_emits_void_procedure_return_without_expression(void) {
     free(assembly);
 }
 
-void test_codegen_emits_for_loop_temporaries_for_procedure_body(void) {
+void test_codegen_uses_frame_local_for_loop_temporaries_for_procedure_body(void) {
     char *assembly = generate_source(
         "procedimento inteiro soma(inteiro a, inteiro b)\n"
         "inicio\n"
@@ -498,10 +525,61 @@ void test_codegen_emits_for_loop_temporaries_for_procedure_body(void) {
         "  x <- soma(1, 2);\n"
         "fim");
 
-    assert_contains(assembly, "_for_end_0 dd 0");
-    assert_contains(assembly, "_for_step_0 dd 0");
+    assert_contains(assembly, "sub esp, 12");
+    assert_contains(assembly, "mov dword [ebp-8], eax");
+    assert_contains(assembly, "mov dword [ebp-12], eax");
+    assert_contains(assembly, "mov eax, dword [ebp-12]");
+    assert_contains(assembly, "mov ebx, dword [ebp-8]");
+    TEST_ASSERT_NULL(strstr(assembly, "_for_end_0 dd 0"));
+    TEST_ASSERT_NULL(strstr(assembly, "_for_step_0 dd 0"));
     assert_contains(assembly, ".Lfor0:");
     assert_contains(assembly, ".Lendfor0:");
+    free(assembly);
+}
+
+void test_codegen_zero_initializes_procedure_locals_on_entry(void) {
+    char *assembly = generate_source(
+        "procedimento inteiro primeiro()\n"
+        "inicio\n"
+        "  inteiro x, y;\n"
+        "  retorna x + y;\n"
+        "fim\n"
+        "programa demo\n"
+        "inteiro z;\n"
+        "inicio\n"
+        "  z <- primeiro();\n"
+        "fim");
+
+    assert_contains_in_order(assembly, "push ebp\n    mov ebp, esp\n    sub esp, 8\n", "    mov dword [ebp-4], 0\n");
+    assert_contains_in_order(assembly, "    mov dword [ebp-4], 0\n", "    mov dword [ebp-8], 0\n");
+    free(assembly);
+}
+
+void test_codegen_assigns_distinct_frame_slots_for_multiple_procedure_for_loops(void) {
+    char *assembly = generate_source(
+        "procedimento inteiro soma(inteiro n)\n"
+        "inicio\n"
+        "  inteiro i, total;\n"
+        "  total <- 0;\n"
+        "  para i de 1 ate n passo 1 faca total <- total + i; fimpara\n"
+        "  para i de n ate 1 passo -1 faca total <- total + i; fimpara\n"
+        "  retorna total;\n"
+        "fim\n"
+        "programa demo\n"
+        "inteiro x;\n"
+        "inicio\n"
+        "  x <- soma(3);\n"
+        "fim");
+
+    assert_contains(assembly, "sub esp, 24");
+    assert_contains(assembly, "mov dword [ebp-12], eax");
+    assert_contains(assembly, "mov dword [ebp-16], eax");
+    assert_contains(assembly, "mov dword [ebp-20], eax");
+    assert_contains(assembly, "mov dword [ebp-24], eax");
+    assert_contains(assembly, "mov eax, dword [ebp-16]");
+    assert_contains(assembly, "mov ebx, dword [ebp-12]");
+    assert_contains(assembly, "mov eax, dword [ebp-24]");
+    assert_contains(assembly, "mov ebx, dword [ebp-20]");
     free(assembly);
 }
 
@@ -518,6 +596,9 @@ int main(void) {
     RUN_TEST(test_codegen_returns_null_when_symbol_fallback_has_no_declarations);
     RUN_TEST(test_codegen_reports_internal_error_for_return_outside_procedure);
     RUN_TEST(test_codegen_reports_float_expression_errors_in_main_body);
+    RUN_TEST(test_codegen_rejects_float_read_in_main_body_with_explicit_error);
+    RUN_TEST(test_codegen_rejects_float_assignment_via_identifier_in_main_body_with_explicit_error);
+    RUN_TEST(test_codegen_rejects_float_write_via_identifier_in_main_body_with_explicit_error);
     RUN_TEST(test_codegen_sets_fallback_error_when_generation_fails_without_specific_diagnostic);
     RUN_TEST(test_codegen_emits_labels_and_jump_for_if_else);
     RUN_TEST(test_codegen_emits_label_and_jump_for_if_without_else);
@@ -535,6 +616,8 @@ int main(void) {
     RUN_TEST(test_codegen_rejects_float_procedure_with_explicit_error);
     RUN_TEST(test_codegen_rejects_float_local_in_procedure_with_explicit_error);
     RUN_TEST(test_codegen_emits_void_procedure_return_without_expression);
-    RUN_TEST(test_codegen_emits_for_loop_temporaries_for_procedure_body);
+    RUN_TEST(test_codegen_uses_frame_local_for_loop_temporaries_for_procedure_body);
+    RUN_TEST(test_codegen_zero_initializes_procedure_locals_on_entry);
+    RUN_TEST(test_codegen_assigns_distinct_frame_slots_for_multiple_procedure_for_loops);
     return UNITY_END();
 }

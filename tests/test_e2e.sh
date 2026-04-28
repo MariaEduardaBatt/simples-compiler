@@ -75,6 +75,20 @@ assert_compile_error \
     "$e2e_dir/semantic_error.stdout" \
     "$e2e_dir/semantic_error.stderr"
 
+cat >"$e2e_dir/codegen_float_main_error.simples" <<'EOF'
+programa demo
+flutuante x;
+inicio
+  leia x;
+fim
+EOF
+assert_compile_error \
+    "$e2e_dir/codegen_float_main_error.simples" \
+    "$e2e_dir/codegen_float_main_error.asm" \
+    "codegen:4:8: Code generation for flutuante values in the main program is not supported yet." \
+    "$e2e_dir/codegen_float_main_error.stdout" \
+    "$e2e_dir/codegen_float_main_error.stderr"
+
 "$compiler" examples/assign.simples "$e2e_dir/assign.asm"
 grep -F "x dd 0" "$e2e_dir/assign.asm" >/dev/null
 grep -F "mov dword [x], 10" "$e2e_dir/assign.asm" >/dev/null
@@ -207,5 +221,31 @@ ld -m elf_i386 "$e2e_dir/procedure_sum.o" -o "$e2e_dir/procedure_sum"
 nasm -f elf32 "$e2e_dir/procedure_void.asm" -o "$e2e_dir/procedure_void.o"
 ld -m elf_i386 "$e2e_dir/procedure_void.o" -o "$e2e_dir/procedure_void"
 [ "$("$e2e_dir/procedure_void")" = "1" ]
+
+cat >"$e2e_dir/procedure_recursive_for.simples" <<'EOF'
+procedimento inteiro fatorial_para(inteiro n)
+inicio
+  inteiro i, total;
+  total <- 0;
+  para i de n ate 1 passo -1 faca
+    se n > 1 entao
+      total <- total + fatorial_para(n - 1);
+    senao
+      total <- total + 1;
+    fimse
+  fimpara
+  retorna total;
+fim
+programa demo
+inteiro x;
+inicio
+  x <- fatorial_para(3);
+  escreval x;
+fim
+EOF
+"$compiler" "$e2e_dir/procedure_recursive_for.simples" "$e2e_dir/procedure_recursive_for.asm"
+nasm -f elf32 "$e2e_dir/procedure_recursive_for.asm" -o "$e2e_dir/procedure_recursive_for.o"
+ld -m elf_i386 "$e2e_dir/procedure_recursive_for.o" -o "$e2e_dir/procedure_recursive_for"
+[ "$("$e2e_dir/procedure_recursive_for")" = "6" ]
 
 printf 'e2e ok\n'
