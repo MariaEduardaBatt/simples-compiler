@@ -71,6 +71,13 @@ void ast_expression_free(ASTExpression *expression) {
         case AST_EXPR_IDENTIFIER:
             free(expression->identifier);
             break;
+        case AST_EXPR_STRING:
+            free(expression->string_value);
+            break;
+        case AST_EXPR_INDEX:
+            free(expression->index_access.name);
+            ast_expression_free(expression->index_access.index);
+            break;
         case AST_EXPR_CALL:
             ast_call_free(&expression->call);
             break;
@@ -97,7 +104,12 @@ void ast_command_free(ASTCommand *command) {
 
     switch (command->type) {
         case AST_COMMAND_ASSIGNMENT:
-            free(command->assignment.name);
+            if (command->assignment.target.type == AST_TARGET_IDENTIFIER) {
+                free(command->assignment.target.identifier);
+            } else {
+                free(command->assignment.target.indexed.name);
+                ast_expression_free(command->assignment.target.indexed.index);
+            }
             ast_expression_free(command->assignment.expression);
             break;
         case AST_COMMAND_READ:

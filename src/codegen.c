@@ -576,8 +576,8 @@ static bool main_command_supports_integer_backend(
 
     switch (command->type) {
         case AST_COMMAND_ASSIGNMENT:
-            if (find_global_declaration_type(program, command->assignment.name, &type) && type == AST_TYPE_FLUTUANTE) {
-                return fail_float_main_codegen(error, command->assignment.line, command->assignment.column);
+            if (find_global_declaration_type(program, command->assignment.target.type == AST_TARGET_IDENTIFIER ? command->assignment.target.identifier : command->assignment.target.indexed.name, &type) && type == AST_TYPE_FLUTUANTE) {
+                return fail_float_main_codegen(error, command->assignment.target.line, command->assignment.target.column);
             }
             return main_expression_supports_integer_backend(command->assignment.expression, program, semantic, error);
         case AST_COMMAND_READ:
@@ -878,14 +878,19 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
     StringBuilder *builder = context->builder;
 
     switch (command->type) {
-        case AST_COMMAND_ASSIGNMENT:
+        case AST_COMMAND_ASSIGNMENT: {
+            const char *assign_name = command->assignment.target.type == AST_TARGET_IDENTIFIER
+                ? command->assignment.target.identifier
+                : command->assignment.target.indexed.name;
+
             if (command->assignment.expression != NULL && command->assignment.expression->type == AST_EXPR_INT) {
-                return generate_store_int_to_name(context, command->assignment.name,
+                return generate_store_int_to_name(context, assign_name,
                                                   command->assignment.expression->int_value);
             }
 
             return generate_expression(context, command->assignment.expression, error) &&
-                   generate_store_eax_to_name(context, command->assignment.name);
+                   generate_store_eax_to_name(context, assign_name);
+        }
         case AST_COMMAND_READ:
             return builder_append(builder, "    call read_int\n") &&
                    generate_store_eax_to_name(context, command->read.name);

@@ -416,9 +416,14 @@ static bool analyze_assignment_command(const ASTAssignmentCommand *assignment, c
     ASTType variable_type;
     ASTType expression_type;
     char message[256];
+    const char *target_name = assignment->target.type == AST_TARGET_IDENTIFIER
+        ? assignment->target.identifier
+        : assignment->target.indexed.name;
+    int target_line = assignment->target.line;
+    int target_column = assignment->target.column;
 
     if (!semantic_check_identifier(
-            ctx->scope, assignment->name, assignment->line, assignment->column, &variable_type, error) ||
+            ctx->scope, target_name, target_line, target_column, &variable_type, error) ||
         !analyze_expression(assignment->expression, ctx, &expression_type, error)) {
         return false;
     }
@@ -428,7 +433,7 @@ static bool analyze_assignment_command(const ASTAssignmentCommand *assignment, c
             message,
             sizeof(message),
             "Variavel '%s' espera tipo '%s', mas recebeu '%s'.",
-            assignment->name,
+            target_name,
             semantic_type_name(variable_type),
             semantic_type_name(expression_type));
         return semantic_fail_expression(assignment->expression, error, message);
