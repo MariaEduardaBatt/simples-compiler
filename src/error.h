@@ -4,7 +4,8 @@
 typedef enum {
     COMPILER_PHASE_LEXER,
     COMPILER_PHASE_PARSER,
-    COMPILER_PHASE_SEMANTIC
+    COMPILER_PHASE_SEMANTIC,
+    COMPILER_PHASE_CODEGEN
 } CompilerPhase;
 
 typedef struct {

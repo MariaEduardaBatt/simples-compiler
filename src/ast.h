@@ -5,8 +5,16 @@
 #include <stddef.h>
 
 typedef enum {
+    AST_TYPE_INTEIRO,
+    AST_TYPE_FLUTUANTE,
+    AST_TYPE_VAZIO
+} ASTType;
+
+typedef enum {
     AST_EXPR_INT,
+    AST_EXPR_FLOAT,
     AST_EXPR_IDENTIFIER,
+    AST_EXPR_CALL,
     AST_EXPR_UNARY,
     AST_EXPR_BINARY
 } ASTExpressionType;
@@ -34,13 +42,37 @@ typedef enum {
 typedef struct ASTExpression ASTExpression;
 typedef struct ASTCommand ASTCommand;
 
+typedef struct {
+    char *name;
+    ASTType type;
+    int line;
+    int column;
+} ASTDeclaration;
+
+typedef struct {
+    char *name;
+    ASTType type;
+    int line;
+    int column;
+} ASTParameter;
+
+typedef struct {
+    char *name;
+    int line;
+    int column;
+    ASTExpression **arguments;
+    size_t argument_count;
+} ASTCall;
+
 struct ASTExpression {
     ASTExpressionType type;
     int line;
     int column;
     union {
         int int_value;
+        double float_value;
         char *identifier;
+        ASTCall call;
         struct {
             ASTUnaryOp op;
             ASTExpression *operand;
@@ -57,12 +89,6 @@ typedef struct {
     char *name;
     int line;
     int column;
-} ASTDeclaration;
-
-typedef struct {
-    char *name;
-    int line;
-    int column;
 } ASTReadCommand;
 
 typedef enum {
@@ -70,6 +96,8 @@ typedef enum {
     AST_COMMAND_READ,
     AST_COMMAND_WRITE,
     AST_COMMAND_WRITELN,
+    AST_COMMAND_CALL,
+    AST_COMMAND_RETURN,
     AST_COMMAND_IF,
     AST_COMMAND_WHILE,
     AST_COMMAND_FOR
@@ -85,6 +113,16 @@ typedef struct {
 typedef struct {
     ASTExpression *expression;
 } ASTWriteCommand;
+
+typedef struct {
+    ASTCall call;
+} ASTCallCommand;
+
+typedef struct {
+    ASTExpression *expression;
+    int line;
+    int column;
+} ASTReturnCommand;
 
 typedef struct {
     ASTExpression *condition;
@@ -117,6 +155,8 @@ struct ASTCommand {
         ASTAssignmentCommand assignment;
         ASTReadCommand read;
         ASTWriteCommand write;
+        ASTCallCommand call_command;
+        ASTReturnCommand return_command;
         ASTIfCommand if_command;
         ASTWhileCommand while_command;
         ASTForCommand for_command;
@@ -125,6 +165,21 @@ struct ASTCommand {
 
 typedef struct {
     char *name;
+    ASTType return_type;
+    ASTParameter *parameters;
+    size_t parameter_count;
+    ASTDeclaration *local_declarations;
+    size_t local_declaration_count;
+    ASTCommand *commands;
+    size_t command_count;
+    int line;
+    int column;
+} ASTProcedure;
+
+typedef struct {
+    char *name;
+    ASTProcedure *procedures;
+    size_t procedure_count;
     ASTDeclaration *declarations;
     size_t declaration_count;
     ASTCommand *commands;
@@ -132,7 +187,11 @@ typedef struct {
 } ASTProgram;
 
 void ast_expression_free(ASTExpression *expression);
+void ast_expression_list_free(ASTExpression **expressions, size_t expression_count);
+void ast_declaration_list_free(ASTDeclaration *declarations, size_t declaration_count);
+void ast_parameter_list_free(ASTParameter *parameters, size_t parameter_count);
 void ast_command_free(ASTCommand *command);
+void ast_procedure_free(ASTProcedure *procedure);
 void ast_program_free(ASTProgram *program);
 
 #endif

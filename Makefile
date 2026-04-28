@@ -54,7 +54,7 @@ test-semantic: $(SEMANTIC_TEST_BIN)
 
 ifneq ($(wildcard tests/test_codegen.c),)
 $(CODEGEN_TEST_BIN): $(CODEGEN_TEST_FILES) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(CODEGEN_TEST_SRCS) -o $@
+	$(CC) $(CFLAGS) -DCODEGEN_TESTING $(CODEGEN_TEST_SRCS) -o $@
 
 test-codegen: $(CODEGEN_TEST_BIN)
 	$(CODEGEN_TEST_BIN)

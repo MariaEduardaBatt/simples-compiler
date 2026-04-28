@@ -205,7 +205,7 @@ bool lexer_scan(const char *source, TokenList *out_tokens, CompilerError *error)
         if (isdigit((unsigned char)current)) {
             const char *start = state.source + state.index;
             size_t length = 0;
-            bool is_float = false;
+            TokenType type = TOK_NUM_INT;
 
             while (isdigit((unsigned char)lexer_peek(&state))) {
                 lexer_advance(&state);
@@ -213,16 +213,17 @@ bool lexer_scan(const char *source, TokenList *out_tokens, CompilerError *error)
             }
 
             if (lexer_peek(&state) == '.' && isdigit((unsigned char)state.source[state.index + 1])) {
-                is_float = true;
+                type = TOK_NUM_FLOAT;
                 lexer_advance(&state);
                 length++;
+
                 while (isdigit((unsigned char)lexer_peek(&state))) {
                     lexer_advance(&state);
                     length++;
                 }
             }
 
-            if (!lexer_push_span(out_tokens, is_float ? TOK_NUM_FLOAT : TOK_NUM_INT, start, length, token_line, token_column)) {
+            if (!lexer_push_span(out_tokens, type, start, length, token_line, token_column)) {
                 lexer_fail(out_tokens, error, token_line, token_column, "Falha ao registrar token.");
                 return false;
             }

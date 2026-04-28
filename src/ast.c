@@ -1,6 +1,26 @@
 #include "ast.h"
 
 #include <stdlib.h>
+#include <string.h>
+
+void ast_expression_list_free(ASTExpression **expressions, size_t expression_count) {
+    size_t index;
+
+    for (index = 0; index < expression_count; ++index) {
+        ast_expression_free(expressions[index]);
+    }
+
+    free(expressions);
+}
+
+static void ast_call_free(ASTCall *call) {
+    if (call == NULL) {
+        return;
+    }
+
+    free(call->name);
+    ast_expression_list_free(call->arguments, call->argument_count);
+}
 
 static void ast_command_list_free(ASTCommand *commands, size_t command_count) {
     size_t index;
@@ -12,6 +32,36 @@ static void ast_command_list_free(ASTCommand *commands, size_t command_count) {
     free(commands);
 }
 
+void ast_declaration_list_free(ASTDeclaration *declarations, size_t declaration_count) {
+    size_t index;
+
+    for (index = 0; index < declaration_count; ++index) {
+        free(declarations[index].name);
+    }
+
+    free(declarations);
+}
+
+void ast_parameter_list_free(ASTParameter *parameters, size_t parameter_count) {
+    size_t index;
+
+    for (index = 0; index < parameter_count; ++index) {
+        free(parameters[index].name);
+    }
+
+    free(parameters);
+}
+
+static void ast_procedure_list_free(ASTProcedure *procedures, size_t procedure_count) {
+    size_t index;
+
+    for (index = 0; index < procedure_count; ++index) {
+        ast_procedure_free(&procedures[index]);
+    }
+
+    free(procedures);
+}
+
 void ast_expression_free(ASTExpression *expression) {
     if (expression == NULL) {
         return;
@@ -21,6 +71,9 @@ void ast_expression_free(ASTExpression *expression) {
         case AST_EXPR_IDENTIFIER:
             free(expression->identifier);
             break;
+        case AST_EXPR_CALL:
+            ast_call_free(&expression->call);
+            break;
         case AST_EXPR_UNARY:
             ast_expression_free(expression->unary.operand);
             break;
@@ -29,6 +82,7 @@ void ast_expression_free(ASTExpression *expression) {
             ast_expression_free(expression->binary.right);
             break;
         case AST_EXPR_INT:
+        case AST_EXPR_FLOAT:
         default:
             break;
     }
@@ -53,12 +107,17 @@ void ast_command_free(ASTCommand *command) {
         case AST_COMMAND_WRITELN:
             ast_expression_free(command->write.expression);
             break;
-        case AST_COMMAND_IF: {
+        case AST_COMMAND_CALL:
+            ast_call_free(&command->call_command.call);
+            break;
+        case AST_COMMAND_RETURN:
+            ast_expression_free(command->return_command.expression);
+            break;
+        case AST_COMMAND_IF:
             ast_expression_free(command->if_command.condition);
             ast_command_list_free(command->if_command.then_commands, command->if_command.then_count);
             ast_command_list_free(command->if_command.else_commands, command->if_command.else_count);
             break;
-        }
         case AST_COMMAND_WHILE:
             ast_expression_free(command->while_command.condition);
             ast_command_list_free(command->while_command.body_commands, command->while_command.body_count);
@@ -75,21 +134,26 @@ void ast_command_free(ASTCommand *command) {
     }
 }
 
-void ast_program_free(ASTProgram *program) {
-    size_t index;
+void ast_procedure_free(ASTProcedure *procedure) {
+    if (procedure == NULL) {
+        return;
+    }
 
+    free(procedure->name);
+    ast_parameter_list_free(procedure->parameters, procedure->parameter_count);
+    ast_declaration_list_free(procedure->local_declarations, procedure->local_declaration_count);
+    ast_command_list_free(procedure->commands, procedure->command_count);
+    memset(procedure, 0, sizeof(*procedure));
+}
+
+void ast_program_free(ASTProgram *program) {
     if (program == NULL) {
         return;
     }
 
     free(program->name);
-
-    for (index = 0; index < program->declaration_count; ++index) {
-        free(program->declarations[index].name);
-    }
-    free(program->declarations);
-
+    ast_procedure_list_free(program->procedures, program->procedure_count);
+    ast_declaration_list_free(program->declarations, program->declaration_count);
     ast_command_list_free(program->commands, program->command_count);
-
     free(program);
 }
