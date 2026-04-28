@@ -625,6 +625,33 @@ void test_codegen_assigns_distinct_frame_slots_for_multiple_procedure_for_loops(
     free(assembly);
 }
 
+void test_codegen_rejects_indexed_assignment_target_with_internal_error(void) {
+    char name[] = "nums";
+    ASTExpression index_expr = {.type = AST_EXPR_INT, .line = 1, .column = 8, .int_value = 0};
+    ASTCommand command = {0};
+    ASTProgram program = {.name = "demo", .commands = &command, .command_count = 1};
+    SemanticInfo semantic = {0};
+    char *assembly = NULL;
+    CompilerError error = {0};
+
+    command.type = AST_COMMAND_ASSIGNMENT;
+    command.assignment.target.type = AST_TARGET_INDEXED;
+    command.assignment.target.line = 1;
+    command.assignment.target.column = 3;
+    command.assignment.target.indexed.name = name;
+    command.assignment.target.indexed.index = &index_expr;
+    command.assignment.expression = NULL;
+
+    TEST_ASSERT_FALSE(codegen_generate_program(&program, &semantic, &assembly, &error));
+    TEST_ASSERT_NULL(assembly);
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
+    TEST_ASSERT_EQUAL_STRING(
+        "Internal error: indexed assignment not yet supported by code generator.",
+        error.message);
+    TEST_ASSERT_EQUAL(1, error.line);
+    TEST_ASSERT_EQUAL(3, error.column);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_codegen_emits_direct_store_for_integer_assignment);
@@ -663,5 +690,6 @@ int main(void) {
     RUN_TEST(test_codegen_uses_frame_local_for_loop_temporaries_for_procedure_body);
     RUN_TEST(test_codegen_zero_initializes_procedure_locals_on_entry);
     RUN_TEST(test_codegen_assigns_distinct_frame_slots_for_multiple_procedure_for_loops);
+    RUN_TEST(test_codegen_rejects_indexed_assignment_target_with_internal_error);
     return UNITY_END();
 }

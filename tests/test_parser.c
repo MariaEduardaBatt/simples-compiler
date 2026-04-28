@@ -496,6 +496,28 @@ void test_parser_parses_string_literal_expression(void) {
     token_list_free(&tokens);
 }
 
+void test_parser_parses_indexed_rvalue_access(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro nums[10];\n"
+        "inteiro x;\n"
+        "inicio\n"
+        "  x <- nums[3];\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    const ASTExpression *expr = program->commands[0].assignment.expression;
+
+    TEST_ASSERT_EQUAL(AST_EXPR_INDEX, expr->type);
+    TEST_ASSERT_EQUAL_STRING("nums", expr->index_access.name);
+    TEST_ASSERT_NOT_NULL(expr->index_access.index);
+    TEST_ASSERT_EQUAL(AST_EXPR_INT, expr->index_access.index->type);
+    TEST_ASSERT_EQUAL_INT(3, expr->index_access.index->int_value);
+
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_parser_builds_assignment_ast_with_expected_counts_and_shape);
@@ -522,5 +544,6 @@ int main(void) {
     RUN_TEST(test_ast_procedure_free_releases_owned_members_and_resets_fields);
     RUN_TEST(test_parser_parses_indexed_declarations_and_indexed_assignment);
     RUN_TEST(test_parser_parses_string_literal_expression);
+    RUN_TEST(test_parser_parses_indexed_rvalue_access);
     return UNITY_END();
 }

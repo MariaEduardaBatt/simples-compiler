@@ -123,6 +123,8 @@ static const char *semantic_type_name(ASTType type) {
             return "flutuante";
         case AST_TYPE_VAZIO:
             return "vazio";
+        case AST_TYPE_STRING:
+            return "string";
         default:
             return "desconhecido";
     }

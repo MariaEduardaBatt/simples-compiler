@@ -139,6 +139,28 @@ static ASTExpression *parser_make_identifier_expression(const Token *token) {
     return expression;
 }
 
+static ASTExpression *parser_make_index_expression(const Token *token, ASTExpression *index) {
+    ASTExpression *expression = calloc(1, sizeof(*expression));
+
+    if (expression == NULL) {
+        return NULL;
+    }
+
+    expression->type = AST_EXPR_INDEX;
+    expression->line = token != NULL ? token->line : 1;
+    expression->column = token != NULL ? token->column : 1;
+    expression->index_access.name = parser_strdup(token != NULL ? token->lexeme : NULL);
+    if (expression->index_access.name == NULL) {
+        free(expression);
+        return NULL;
+    }
+    expression->index_access.index = index;
+    expression->index_access.line = expression->line;
+    expression->index_access.column = expression->column;
+
+    return expression;
+}
+
 static ASTExpression *parser_make_call_expression(const Token *token, ASTExpression **arguments, size_t argument_count) {
     ASTExpression *expression = calloc(1, sizeof(*expression));
 
@@ -212,7 +234,8 @@ static ASTExpression *parser_make_string_expression(const Token *token) {
     return expression;
 }
 
-static ASTExpression *parser_make_unary_expression(const Token *token, ASTUnaryOp op, ASTExpression *operand) {    ASTExpression *expression = calloc(1, sizeof(*expression));
+static ASTExpression *parser_make_unary_expression(const Token *token, ASTUnaryOp op, ASTExpression *operand) {
+    ASTExpression *expression = calloc(1, sizeof(*expression));
 
     if (expression == NULL) {
         return NULL;
@@ -414,6 +437,22 @@ static ASTExpression *parse_factor(Parser *parser, CompilerError *error) {
         size_t argument_count = 0;
 
         token = parser_previous(parser);
+        if (parser_match(parser, TOK_ABRE_COL)) {
+            ASTExpression *index_expr = parse_expression(parser, error);
+            if (index_expr == NULL) {
+                return NULL;
+            }
+            if (!parser_expect(parser, TOK_FECHA_COL, error, "Esperado ']'.")) {
+                ast_expression_free(index_expr);
+                return NULL;
+            }
+            expression = parser_make_index_expression(token, index_expr);
+            if (expression == NULL) {
+                ast_expression_free(index_expr);
+                parser_oom(parser, error);
+            }
+            return expression;
+        }
         if (!parser_match(parser, TOK_ABRE_PAR)) {
             expression = parser_make_identifier_expression(token);
             if (expression == NULL) {

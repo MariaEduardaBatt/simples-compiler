@@ -879,17 +879,23 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
 
     switch (command->type) {
         case AST_COMMAND_ASSIGNMENT: {
-            const char *assign_name = command->assignment.target.type == AST_TARGET_IDENTIFIER
-                ? command->assignment.target.identifier
-                : command->assignment.target.indexed.name;
+            if (command->assignment.target.type == AST_TARGET_INDEXED) {
+                compiler_error_set(
+                    error,
+                    COMPILER_PHASE_CODEGEN,
+                    command->assignment.target.line,
+                    command->assignment.target.column,
+                    "Internal error: indexed assignment not yet supported by code generator.");
+                return false;
+            }
 
             if (command->assignment.expression != NULL && command->assignment.expression->type == AST_EXPR_INT) {
-                return generate_store_int_to_name(context, assign_name,
+                return generate_store_int_to_name(context, command->assignment.target.identifier,
                                                   command->assignment.expression->int_value);
             }
 
             return generate_expression(context, command->assignment.expression, error) &&
-                   generate_store_eax_to_name(context, assign_name);
+                   generate_store_eax_to_name(context, command->assignment.target.identifier);
         }
         case AST_COMMAND_READ:
             return builder_append(builder, "    call read_int\n") &&
