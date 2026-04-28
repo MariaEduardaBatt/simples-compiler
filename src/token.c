@@ -33,6 +33,8 @@ const char *token_type_name(TokenType type) {
             return "TOK_INTEIRO";
         case TOK_FLUTUANTE:
             return "TOK_FLUTUANTE";
+        case TOK_STRING:
+            return "TOK_STRING";
         case TOK_VAZIO:
             return "TOK_VAZIO";
         case TOK_PROCEDIMENTO:
@@ -83,6 +85,8 @@ const char *token_type_name(TokenType type) {
             return "TOK_NUM_INT";
         case TOK_NUM_FLOAT:
             return "TOK_NUM_FLOAT";
+        case TOK_STRING_LITERAL:
+            return "TOK_STRING_LITERAL";
         case TOK_ATRIB:
             return "TOK_ATRIB";
         case TOK_MAIOR:
@@ -107,6 +111,10 @@ const char *token_type_name(TokenType type) {
             return "TOK_ABRE_PAR";
         case TOK_FECHA_PAR:
             return "TOK_FECHA_PAR";
+        case TOK_ABRE_COL:
+            return "TOK_ABRE_COL";
+        case TOK_FECHA_COL:
+            return "TOK_FECHA_COL";
         case TOK_VIRGULA:
             return "TOK_VIRGULA";
         case TOK_PONTO_VIRGULA:

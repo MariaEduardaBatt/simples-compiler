@@ -58,6 +58,13 @@ void test_token_list_grows_and_preserves_all_entries_after_growth(void) {
     token_list_free(&list);
 }
 
+void test_token_type_name_returns_string_and_bracket_token_names(void) {
+    TEST_ASSERT_EQUAL_STRING("TOK_STRING", token_type_name(TOK_STRING));
+    TEST_ASSERT_EQUAL_STRING("TOK_STRING_LITERAL", token_type_name(TOK_STRING_LITERAL));
+    TEST_ASSERT_EQUAL_STRING("TOK_ABRE_COL", token_type_name(TOK_ABRE_COL));
+    TEST_ASSERT_EQUAL_STRING("TOK_FECHA_COL", token_type_name(TOK_FECHA_COL));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_token_type_name_returns_keyword_name);
@@ -65,5 +72,6 @@ int main(void) {
     RUN_TEST(test_token_type_name_returns_leia_name);
     RUN_TEST(test_token_type_name_returns_procedure_and_float_names);
     RUN_TEST(test_token_list_grows_and_preserves_all_entries_after_growth);
+    RUN_TEST(test_token_type_name_returns_string_and_bracket_token_names);
     return UNITY_END();
 }

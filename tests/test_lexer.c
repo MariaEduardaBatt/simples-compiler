@@ -180,6 +180,22 @@ void test_lexer_scans_vazio_keyword(void) {
     token_list_free(&tokens);
 }
 
+void test_lexer_scans_string_keyword_brackets_and_literal(void) {
+    const char *source = "string nome[32]; escreval \"oi\";";
+    TokenList tokens = {0};
+    CompilerError error = {0};
+
+    token_list_init(&tokens);
+    TEST_ASSERT_TRUE(lexer_scan(source, &tokens, &error));
+    assert_token(&tokens, 0, TOK_STRING, "string", 1, 1);
+    assert_token(&tokens, 2, TOK_ABRE_COL, "[", 1, 12);
+    assert_token(&tokens, 3, TOK_NUM_INT, "32", 1, 13);
+    assert_token(&tokens, 4, TOK_FECHA_COL, "]", 1, 15);
+    assert_token(&tokens, 6, TOK_ESCREVAL, "escreval", 1, 18);
+    assert_token(&tokens, 7, TOK_STRING_LITERAL, "\"oi\"", 1, 27);
+    token_list_free(&tokens);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_lexer_scans_program_structure_into_expected_tokens);
@@ -191,5 +207,6 @@ int main(void) {
     RUN_TEST(test_lexer_scans_leia_statement);
     RUN_TEST(test_lexer_scans_procedure_keywords_and_float_literals);
     RUN_TEST(test_lexer_scans_vazio_keyword);
+    RUN_TEST(test_lexer_scans_string_keyword_brackets_and_literal);
     return UNITY_END();
 }
