@@ -247,9 +247,9 @@ static bool generate_store_int_to_name(CodegenContext *context, const char *name
 /* Push an expression result onto the stack; optimise integer literals to push <N>. */
 static bool generate_push_expression(CodegenContext *context, const ASTExpression *expression, CompilerError *error);
 
-static const char *symbol_name_at(const ASTProgram *program, const SymbolTable *symbols, size_t index) {
-    if (symbols != NULL && symbols->names != NULL && index < symbols->count) {
-        const char *name = symbols->names[index];
+static const char *symbol_name_at(const ASTProgram *program, const SymbolInfo *globals, size_t global_count, size_t index) {
+    if (globals != NULL && index < global_count) {
+        const char *name = globals[index].name;
 
         if (name != NULL) {
             return name;
@@ -267,9 +267,9 @@ static const char *symbol_name_at(const ASTProgram *program, const SymbolTable *
     return NULL;
 }
 
-static size_t symbol_count(const ASTProgram *program, const SymbolTable *symbols) {
-    if (symbols != NULL && symbols->names != NULL) {
-        return symbols->count;
+static size_t symbol_count(const ASTProgram *program, const SymbolInfo *globals, size_t global_count) {
+    if (globals != NULL) {
+        return global_count;
     }
 
     if (program != NULL) {
@@ -1299,7 +1299,8 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
     SizeList for_loop_ids = {0};
     SizeList main_for_loop_ids = {0};
     CodegenContext context;
-    const SymbolTable *symbols;
+    const SymbolInfo *globals;
+    size_t global_count;
     size_t index;
     size_t next_label_id = 0;
 
@@ -1311,7 +1312,8 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
         return fail_codegen_internal(error, 0, 0, "Internal error: code generation failed.");
     }
 
-    symbols = (semantic != NULL) ? &semantic->globals : NULL;
+    globals = (semantic != NULL) ? semantic->globals : NULL;
+    global_count = (semantic != NULL) ? semantic->global_count : 0;
 
     /* Pre-check: reject any flutuante procedure before emitting anything. */
     for (index = 0; index < program->procedure_count; index++) {
@@ -1341,8 +1343,8 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
         goto fail;
     }
 
-    for (index = 0; index < symbol_count(program, symbols); ++index) {
-        const char *name = symbol_name_at(program, symbols, index);
+    for (index = 0; index < symbol_count(program, globals, global_count); ++index) {
+        const char *name = symbol_name_at(program, globals, global_count, index);
 
         if (name == NULL || !builder_append_user_symbol_declaration(&builder, &for_loop_ids, name)) {
             goto fail;

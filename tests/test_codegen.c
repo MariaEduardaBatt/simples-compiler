@@ -173,7 +173,7 @@ void test_codegen_uses_program_declarations_when_symbol_names_are_missing(void) 
     char name[] = "x";
     ASTDeclaration declaration = {.name = name, .line = 1, .column = 1};
     ASTProgram program = {.name = "demo", .declarations = &declaration, .declaration_count = 1};
-    SemanticInfo semantic = {.globals = {.names = NULL, .count = 1}};
+    SemanticInfo semantic = {.globals = NULL, .global_count = 1};
     char *assembly = NULL;
     CompilerError error = {0};
 
@@ -186,7 +186,7 @@ void test_codegen_uses_program_declarations_when_symbol_names_are_missing(void) 
 
 void test_codegen_returns_null_when_symbol_fallback_has_no_declarations(void) {
     ASTProgram program = {.name = "demo", .declarations = NULL, .declaration_count = 1};
-    SemanticInfo semantic = {.globals = {.names = NULL, .count = 1}};
+    SemanticInfo semantic = {.globals = NULL, .global_count = 1};
     char *assembly = NULL;
     CompilerError error = {0};
 

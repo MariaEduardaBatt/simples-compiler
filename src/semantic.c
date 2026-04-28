@@ -7,6 +7,7 @@
 typedef struct {
     char *name;
     ASTType type;
+    ASTStorageKind storage;
 } TypedSymbol;
 
 typedef struct {
@@ -39,22 +40,6 @@ static char *semantic_strdup(const char *text) {
     return copy;
 }
 
-void symbol_table_free(SymbolTable *symbols) {
-    size_t index;
-
-    if (symbols == NULL) {
-        return;
-    }
-
-    for (index = 0; index < symbols->count; ++index) {
-        free(symbols->names[index]);
-    }
-
-    free(symbols->names);
-    symbols->names = NULL;
-    symbols->count = 0;
-}
-
 void semantic_info_free(SemanticInfo *info) {
     size_t index;
 
@@ -62,7 +47,12 @@ void semantic_info_free(SemanticInfo *info) {
         return;
     }
 
-    symbol_table_free(&info->globals);
+    for (index = 0; index < info->global_count; ++index) {
+        free(info->globals[index].name);
+    }
+    free(info->globals);
+    info->globals = NULL;
+    info->global_count = 0;
 
     for (index = 0; index < info->procedure_count; ++index) {
         free(info->procedures[index].name);
@@ -130,38 +120,6 @@ static const char *semantic_type_name(ASTType type) {
     }
 }
 
-static bool symbol_table_contains(const SymbolTable *symbols, const char *name) {
-    size_t index;
-
-    for (index = 0; index < symbols->count; ++index) {
-        if (strcmp(symbols->names[index], name) == 0) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-static bool symbol_table_append(SymbolTable *symbols, const char *name) {
-    char **names;
-    char *copy;
-
-    copy = semantic_strdup(name);
-    if (copy == NULL) {
-        return false;
-    }
-
-    names = realloc(symbols->names, (symbols->count + 1) * sizeof(*symbols->names));
-    if (names == NULL) {
-        free(copy);
-        return false;
-    }
-
-    symbols->names = names;
-    symbols->names[symbols->count++] = copy;
-    return true;
-}
-
 static bool typed_scope_contains(const TypedScope *scope, const char *name) {
     size_t index;
 
@@ -174,7 +132,7 @@ static bool typed_scope_contains(const TypedScope *scope, const char *name) {
     return false;
 }
 
-static bool typed_scope_append(TypedScope *scope, const char *name, ASTType type) {
+static bool typed_scope_append(TypedScope *scope, const char *name, ASTType type, ASTStorageKind storage) {
     TypedSymbol *symbols;
     char *copy;
 
@@ -192,17 +150,21 @@ static bool typed_scope_append(TypedScope *scope, const char *name, ASTType type
     scope->symbols = symbols;
     scope->symbols[scope->count].name = copy;
     scope->symbols[scope->count].type = type;
+    scope->symbols[scope->count].storage = storage;
     scope->count++;
     return true;
 }
 
-static bool typed_scope_lookup(const TypedScope *scope, const char *name, ASTType *out_type) {
+static bool typed_scope_lookup(const TypedScope *scope, const char *name, ASTType *out_type, ASTStorageKind *out_storage) {
     size_t index;
 
     for (index = 0; index < scope->count; ++index) {
         if (strcmp(scope->symbols[index].name, name) == 0) {
             if (out_type != NULL) {
                 *out_type = scope->symbols[index].type;
+            }
+            if (out_storage != NULL) {
+                *out_storage = scope->symbols[index].storage;
             }
             return true;
         }
@@ -215,12 +177,48 @@ static bool semantic_check_identifier(
     const TypedScope *scope, const char *name, int line, int column, ASTType *out_type, CompilerError *error) {
     char message[256];
 
-    if (typed_scope_lookup(scope, name, out_type)) {
+    if (typed_scope_lookup(scope, name, out_type, NULL)) {
         return true;
     }
 
     snprintf(message, sizeof(message), "Identificador '%s' nao declarado.", name);
     return semantic_fail_at(error, line, column, message);
+}
+
+static bool semantic_info_contains_global(const SemanticInfo *info, const char *name) {
+    size_t index;
+
+    for (index = 0; index < info->global_count; ++index) {
+        if (strcmp(info->globals[index].name, name) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool semantic_info_append_global(SemanticInfo *info, const ASTDeclaration *decl) {
+    SymbolInfo *globals;
+    char *name_copy;
+
+    name_copy = semantic_strdup(decl->name);
+    if (name_copy == NULL) {
+        return false;
+    }
+
+    globals = realloc(info->globals, (info->global_count + 1) * sizeof(*info->globals));
+    if (globals == NULL) {
+        free(name_copy);
+        return false;
+    }
+
+    info->globals = globals;
+    info->globals[info->global_count].name = name_copy;
+    info->globals[info->global_count].type = decl->type;
+    info->globals[info->global_count].storage = decl->storage;
+    info->globals[info->global_count].capacity = decl->capacity;
+    info->global_count++;
+    return true;
 }
 
 static const ProcedureSignature *find_procedure(const SemanticInfo *info, const char *name) {
@@ -378,6 +376,11 @@ static bool analyze_binary_expression(
 }
 
 static bool analyze_expression(const ASTExpression *expression, const SemanticContext *ctx, ASTType *out_type, CompilerError *error) {
+    ASTType base_type;
+    ASTStorageKind base_storage;
+    ASTType index_type;
+    char message[256];
+
     if (expression == NULL) {
         return semantic_fail(error, "Expressao invalida.");
     }
@@ -393,9 +396,34 @@ static bool analyze_expression(const ASTExpression *expression, const SemanticCo
                 *out_type = AST_TYPE_FLUTUANTE;
             }
             return true;
+        case AST_EXPR_STRING:
+            if (out_type != NULL) {
+                *out_type = AST_TYPE_STRING;
+            }
+            return true;
         case AST_EXPR_IDENTIFIER:
             return semantic_check_identifier(
                 ctx->scope, expression->identifier, expression->line, expression->column, out_type, error);
+        case AST_EXPR_INDEX:
+            if (!typed_scope_lookup(ctx->scope, expression->index_access.name, &base_type, &base_storage)) {
+                snprintf(message, sizeof(message), "Identificador '%s' nao declarado.", expression->index_access.name);
+                return semantic_fail_at(error, expression->index_access.line, expression->index_access.column, message);
+            }
+            if (base_storage != AST_STORAGE_INDEXED) {
+                snprintf(message, sizeof(message), "Identificador '%s' nao pode ser indexado.", expression->index_access.name);
+                return semantic_fail_at(error, expression->index_access.line, expression->index_access.column, message);
+            }
+            if (!analyze_expression(expression->index_access.index, ctx, &index_type, error)) {
+                return false;
+            }
+            if (index_type != AST_TYPE_INTEIRO) {
+                return semantic_fail_expression(
+                    expression->index_access.index, error, "Indice deve ser do tipo 'inteiro'.");
+            }
+            if (out_type != NULL) {
+                *out_type = base_type;
+            }
+            return true;
         case AST_EXPR_CALL:
             return analyze_call(&expression->call, ctx, true, out_type, error);
         case AST_EXPR_UNARY:
@@ -416,7 +444,9 @@ static bool analyze_command_list(
 
 static bool analyze_assignment_command(const ASTAssignmentCommand *assignment, const SemanticContext *ctx, CompilerError *error) {
     ASTType variable_type;
+    ASTStorageKind variable_storage;
     ASTType expression_type;
+    ASTType index_type;
     char message[256];
     const char *target_name = assignment->target.type == AST_TARGET_IDENTIFIER
         ? assignment->target.identifier
@@ -424,9 +454,26 @@ static bool analyze_assignment_command(const ASTAssignmentCommand *assignment, c
     int target_line = assignment->target.line;
     int target_column = assignment->target.column;
 
-    if (!semantic_check_identifier(
-            ctx->scope, target_name, target_line, target_column, &variable_type, error) ||
-        !analyze_expression(assignment->expression, ctx, &expression_type, error)) {
+    if (!typed_scope_lookup(ctx->scope, target_name, &variable_type, &variable_storage)) {
+        snprintf(message, sizeof(message), "Identificador '%s' nao declarado.", target_name);
+        return semantic_fail_at(error, target_line, target_column, message);
+    }
+
+    if (assignment->target.type == AST_TARGET_INDEXED) {
+        if (variable_storage != AST_STORAGE_INDEXED) {
+            snprintf(message, sizeof(message), "Identificador '%s' nao pode ser indexado.", target_name);
+            return semantic_fail_at(error, target_line, target_column, message);
+        }
+        if (!analyze_expression(assignment->target.indexed.index, ctx, &index_type, error)) {
+            return false;
+        }
+        if (index_type != AST_TYPE_INTEIRO) {
+            return semantic_fail_expression(
+                assignment->target.indexed.index, error, "Indice deve ser do tipo 'inteiro'.");
+        }
+    }
+
+    if (!analyze_expression(assignment->expression, ctx, &expression_type, error)) {
         return false;
     }
 
@@ -639,23 +686,27 @@ static bool analyze_procedure(const ASTProcedure *procedure, const SemanticInfo 
                 error, procedure->parameters[index].line, procedure->parameters[index].column, message);
         }
 
-        if (!typed_scope_append(&scope, procedure->parameters[index].name, procedure->parameters[index].type)) {
+        if (!typed_scope_append(&scope, procedure->parameters[index].name, procedure->parameters[index].type, AST_STORAGE_SCALAR)) {
             typed_scope_free(&scope);
             return semantic_fail(error, "Memoria insuficiente.");
         }
     }
 
     for (index = 0; index < procedure->local_declaration_count; ++index) {
-        if (typed_scope_contains(&scope, procedure->local_declarations[index].name)) {
-            snprintf(message, sizeof(message), "Identificador '%s' ja declarado.", procedure->local_declarations[index].name);
+        const ASTDeclaration *decl = &procedure->local_declarations[index];
+
+        if (typed_scope_contains(&scope, decl->name)) {
+            snprintf(message, sizeof(message), "Identificador '%s' ja declarado.", decl->name);
             typed_scope_free(&scope);
-            return semantic_fail_declaration(&procedure->local_declarations[index], error, message);
+            return semantic_fail_declaration(decl, error, message);
         }
 
-        if (!typed_scope_append(
-                &scope,
-                procedure->local_declarations[index].name,
-                procedure->local_declarations[index].type)) {
+        if (decl->type == AST_TYPE_STRING && decl->storage != AST_STORAGE_INDEXED) {
+            typed_scope_free(&scope);
+            return semantic_fail_declaration(decl, error, "Declaracao de string requer capacidade fixa.");
+        }
+
+        if (!typed_scope_append(&scope, decl->name, decl->type, decl->storage)) {
             typed_scope_free(&scope);
             return semantic_fail(error, "Memoria insuficiente.");
         }
@@ -696,8 +747,8 @@ bool analyze_program(const ASTProgram *program, SemanticInfo *out_info, Compiler
         return semantic_fail(error, "Saida invalida.");
     }
 
-    out_info->globals.names = NULL;
-    out_info->globals.count = 0;
+    out_info->globals = NULL;
+    out_info->global_count = 0;
     out_info->procedures = NULL;
     out_info->procedure_count = 0;
 
@@ -750,15 +801,23 @@ bool analyze_program(const ASTProgram *program, SemanticInfo *out_info, Compiler
     }
 
     for (index = 0; index < program->declaration_count; ++index) {
-        if (symbol_table_contains(&info.globals, program->declarations[index].name)) {
-            snprintf(message, sizeof(message), "Identificador '%s' ja declarado.", program->declarations[index].name);
+        const ASTDeclaration *decl = &program->declarations[index];
+
+        if (semantic_info_contains_global(&info, decl->name)) {
+            snprintf(message, sizeof(message), "Identificador '%s' ja declarado.", decl->name);
             semantic_info_free(&info);
             typed_scope_free(&global_scope);
-            return semantic_fail_declaration(&program->declarations[index], error, message);
+            return semantic_fail_declaration(decl, error, message);
         }
 
-        if (!symbol_table_append(&info.globals, program->declarations[index].name) ||
-            !typed_scope_append(&global_scope, program->declarations[index].name, program->declarations[index].type)) {
+        if (decl->type == AST_TYPE_STRING && decl->storage != AST_STORAGE_INDEXED) {
+            semantic_info_free(&info);
+            typed_scope_free(&global_scope);
+            return semantic_fail_declaration(decl, error, "Declaracao de string requer capacidade fixa.");
+        }
+
+        if (!semantic_info_append_global(&info, decl) ||
+            !typed_scope_append(&global_scope, decl->name, decl->type, decl->storage)) {
             semantic_info_free(&info);
             typed_scope_free(&global_scope);
             return semantic_fail(error, "Memoria insuficiente.");
