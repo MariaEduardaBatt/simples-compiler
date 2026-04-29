@@ -144,6 +144,11 @@ nasm -f elf32 "$e2e_dir/for.asm" -o "$e2e_dir/for.o"
 ld -m elf_i386 "$e2e_dir/for.o" -o "$e2e_dir/for"
 [ "$("$e2e_dir/for")" = "15" ]
 
+"$compiler" examples/vector_sum.simples "$e2e_dir/vector_sum.asm"
+nasm -f elf32 "$e2e_dir/vector_sum.asm" -o "$e2e_dir/vector_sum.o"
+ld -m elf_i386 "$e2e_dir/vector_sum.o" -o "$e2e_dir/vector_sum"
+[ "$("$e2e_dir/vector_sum")" = "10" ]
+
 cat >"$e2e_dir/for_negative_step.simples" <<'EOF'
 programa demo
 inteiro i;
@@ -177,6 +182,12 @@ nasm -f elf32 "$e2e_dir/read.asm" -o "$e2e_dir/read.o"
 ld -m elf_i386 "$e2e_dir/read.o" -o "$e2e_dir/read"
 output=$(printf '42\n' | "$e2e_dir/read")
 [ "$output" = "42" ]
+
+"$compiler" examples/string_echo.simples "$e2e_dir/string_echo.asm"
+nasm -f elf32 "$e2e_dir/string_echo.asm" -o "$e2e_dir/string_echo.o"
+ld -m elf_i386 "$e2e_dir/string_echo.o" -o "$e2e_dir/string_echo"
+output=$(printf 'ana\n' | "$e2e_dir/string_echo")
+[ "$output" = "ana" ]
 
 output=$(printf '%s\n' '-17' | "$e2e_dir/read")
 [ "$output" = "-17" ]
