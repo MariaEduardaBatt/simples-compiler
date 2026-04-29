@@ -458,6 +458,16 @@ static bool fail_float_main_codegen(CompilerError *error, int line, int column) 
     return false;
 }
 
+static bool fail_string_index_codegen(CompilerError *error, int line, int column) {
+    compiler_error_set(
+        error,
+        COMPILER_PHASE_CODEGEN,
+        line,
+        column,
+        "Code generation for string-indexed expressions is not supported yet.");
+    return false;
+}
+
 static bool fail_codegen_internal(CompilerError *error, int line, int column, const char *message) {
     if (error != NULL && error->message[0] == '\0') {
         compiler_error_set(
@@ -509,8 +519,10 @@ static bool resolve_procedure_for_loop_offsets(
         error, line, column, "Internal error: missing procedure for-loop temporary slot mapping.");
 }
 
-static bool procedure_expression_supports_integer_backend(const ASTExpression *expression, CompilerError *error) {
+static bool procedure_expression_supports_integer_backend(const ASTExpression *expression, const ASTProcedure *proc, CompilerError *error) {
     size_t index;
+    size_t i;
+    ASTType base_type;
 
     if (expression == NULL) {
         return true;
@@ -524,18 +536,29 @@ static bool procedure_expression_supports_integer_backend(const ASTExpression *e
             return fail_float_procedure_codegen(error, expression->line, expression->column);
         case AST_EXPR_CALL:
             for (index = 0; index < expression->call.argument_count; ++index) {
-                if (!procedure_expression_supports_integer_backend(expression->call.arguments[index], error)) {
+                if (!procedure_expression_supports_integer_backend(expression->call.arguments[index], proc, error)) {
                     return false;
                 }
             }
             return true;
         case AST_EXPR_UNARY:
-            return procedure_expression_supports_integer_backend(expression->unary.operand, error);
+            return procedure_expression_supports_integer_backend(expression->unary.operand, proc, error);
         case AST_EXPR_BINARY:
-            return procedure_expression_supports_integer_backend(expression->binary.left, error) &&
-                   procedure_expression_supports_integer_backend(expression->binary.right, error);
+            return procedure_expression_supports_integer_backend(expression->binary.left, proc, error) &&
+                   procedure_expression_supports_integer_backend(expression->binary.right, proc, error);
         case AST_EXPR_INDEX:
-            return procedure_expression_supports_integer_backend(expression->index_access.index, error);
+            if (proc != NULL) {
+                for (i = 0; i < proc->local_declaration_count; i++) {
+                    if (strcmp(proc->local_declarations[i].name, expression->index_access.name) == 0) {
+                        base_type = proc->local_declarations[i].type;
+                        if (base_type == AST_TYPE_STRING) {
+                            return fail_string_index_codegen(error, expression->line, expression->column);
+                        }
+                        break;
+                    }
+                }
+            }
+            return procedure_expression_supports_integer_backend(expression->index_access.index, proc, error);
         default:
             compiler_error_set(
                 error,
@@ -622,6 +645,10 @@ static bool main_expression_supports_integer_backend(
             return main_expression_supports_integer_backend(expression->binary.left, program, semantic, error) &&
                    main_expression_supports_integer_backend(expression->binary.right, program, semantic, error);
         case AST_EXPR_INDEX:
+            if (find_global_declaration_type(program, expression->index_access.name, &type) &&
+                type == AST_TYPE_STRING) {
+                return fail_string_index_codegen(error, expression->line, expression->column);
+            }
             return main_expression_supports_integer_backend(expression->index_access.index, program, semantic, error);
         default:
             compiler_error_set(
@@ -647,6 +674,12 @@ static bool main_command_supports_integer_backend(
         case AST_COMMAND_ASSIGNMENT:
             if (find_global_declaration_type(program, command->assignment.target.type == AST_TARGET_IDENTIFIER ? command->assignment.target.identifier : command->assignment.target.indexed.name, &type) && type == AST_TYPE_FLUTUANTE) {
                 return fail_float_main_codegen(error, command->assignment.target.line, command->assignment.target.column);
+            }
+            if (command->assignment.target.type == AST_TARGET_INDEXED &&
+                find_global_declaration_type(program, command->assignment.target.indexed.name, &type) &&
+                type == AST_TYPE_STRING) {
+                return fail_string_index_codegen(
+                    error, command->assignment.target.line, command->assignment.target.column);
             }
             return main_expression_supports_integer_backend(command->assignment.expression, program, semantic, error);
         case AST_COMMAND_READ:
@@ -740,8 +773,10 @@ static bool main_program_supports_integer_backend(
     return true;
 }
 
-static bool procedure_command_supports_integer_backend(const ASTCommand *command, CompilerError *error) {
+static bool procedure_command_supports_integer_backend(const ASTCommand *command, const ASTProcedure *proc, CompilerError *error) {
     size_t index;
+    size_t i;
+    ASTType base_type;
 
     if (command == NULL) {
         return true;
@@ -749,54 +784,68 @@ static bool procedure_command_supports_integer_backend(const ASTCommand *command
 
     switch (command->type) {
         case AST_COMMAND_ASSIGNMENT:
-            return procedure_expression_supports_integer_backend(command->assignment.expression, error);
+            if (command->assignment.target.type == AST_TARGET_INDEXED && proc != NULL) {
+                for (i = 0; i < proc->local_declaration_count; i++) {
+                    if (strcmp(proc->local_declarations[i].name, command->assignment.target.indexed.name) == 0) {
+                        base_type = proc->local_declarations[i].type;
+                        if (base_type == AST_TYPE_STRING) {
+                            return fail_string_index_codegen(
+                                error,
+                                command->assignment.target.line,
+                                command->assignment.target.column);
+                        }
+                        break;
+                    }
+                }
+            }
+            return procedure_expression_supports_integer_backend(command->assignment.expression, proc, error);
         case AST_COMMAND_READ:
             return true;
         case AST_COMMAND_WRITE:
         case AST_COMMAND_WRITELN:
-            return procedure_expression_supports_integer_backend(command->write.expression, error);
+            return procedure_expression_supports_integer_backend(command->write.expression, proc, error);
         case AST_COMMAND_CALL:
             for (index = 0; index < command->call_command.call.argument_count; ++index) {
-                if (!procedure_expression_supports_integer_backend(command->call_command.call.arguments[index], error)) {
+                if (!procedure_expression_supports_integer_backend(command->call_command.call.arguments[index], proc, error)) {
                     return false;
                 }
             }
             return true;
         case AST_COMMAND_RETURN:
-            return procedure_expression_supports_integer_backend(command->return_command.expression, error);
+            return procedure_expression_supports_integer_backend(command->return_command.expression, proc, error);
         case AST_COMMAND_IF:
-            if (!procedure_expression_supports_integer_backend(command->if_command.condition, error)) {
+            if (!procedure_expression_supports_integer_backend(command->if_command.condition, proc, error)) {
                 return false;
             }
             for (index = 0; index < command->if_command.then_count; ++index) {
-                if (!procedure_command_supports_integer_backend(&command->if_command.then_commands[index], error)) {
+                if (!procedure_command_supports_integer_backend(&command->if_command.then_commands[index], proc, error)) {
                     return false;
                 }
             }
             for (index = 0; index < command->if_command.else_count; ++index) {
-                if (!procedure_command_supports_integer_backend(&command->if_command.else_commands[index], error)) {
+                if (!procedure_command_supports_integer_backend(&command->if_command.else_commands[index], proc, error)) {
                     return false;
                 }
             }
             return true;
         case AST_COMMAND_WHILE:
-            if (!procedure_expression_supports_integer_backend(command->while_command.condition, error)) {
+            if (!procedure_expression_supports_integer_backend(command->while_command.condition, proc, error)) {
                 return false;
             }
             for (index = 0; index < command->while_command.body_count; ++index) {
-                if (!procedure_command_supports_integer_backend(&command->while_command.body_commands[index], error)) {
+                if (!procedure_command_supports_integer_backend(&command->while_command.body_commands[index], proc, error)) {
                     return false;
                 }
             }
             return true;
         case AST_COMMAND_FOR:
-            if (!procedure_expression_supports_integer_backend(command->for_command.start_expression, error) ||
-                !procedure_expression_supports_integer_backend(command->for_command.end_expression, error) ||
-                !procedure_expression_supports_integer_backend(command->for_command.step_expression, error)) {
+            if (!procedure_expression_supports_integer_backend(command->for_command.start_expression, proc, error) ||
+                !procedure_expression_supports_integer_backend(command->for_command.end_expression, proc, error) ||
+                !procedure_expression_supports_integer_backend(command->for_command.step_expression, proc, error)) {
                 return false;
             }
             for (index = 0; index < command->for_command.body_count; ++index) {
-                if (!procedure_command_supports_integer_backend(&command->for_command.body_commands[index], error)) {
+                if (!procedure_command_supports_integer_backend(&command->for_command.body_commands[index], proc, error)) {
                     return false;
                 }
             }
@@ -839,7 +888,7 @@ static bool procedure_supports_integer_backend(const ASTProcedure *procedure, Co
     }
 
     for (index = 0; index < procedure->command_count; ++index) {
-        if (!procedure_command_supports_integer_backend(&procedure->commands[index], error)) {
+        if (!procedure_command_supports_integer_backend(&procedure->commands[index], procedure, error)) {
             return false;
         }
     }
@@ -938,6 +987,24 @@ static bool generate_expression(CodegenContext *context, const ASTExpression *ex
         case AST_EXPR_INDEX: {
             const ASTIndexedAccess *access = &expression->index_access;
             size_t base_offset;
+            ASTType indexed_base_type;
+
+            /* Safety net: reject string-indexed reads even if support check missed it. */
+            if (context->proc_locals != NULL) {
+                size_t si;
+                for (si = 0; si < context->proc_local_count; si++) {
+                    if (strcmp(context->proc_locals[si].name, access->name) == 0) {
+                        indexed_base_type = context->proc_locals[si].type;
+                        if (indexed_base_type == AST_TYPE_STRING) {
+                            return fail_string_index_codegen(error, expression->line, expression->column);
+                        }
+                        break;
+                    }
+                }
+            } else if (find_global_declaration_type(context->program, access->name, &indexed_base_type) &&
+                       indexed_base_type == AST_TYPE_STRING) {
+                return fail_string_index_codegen(error, expression->line, expression->column);
+            }
 
             /* Local vector: elements stored descending from ebp (nums[0]=ebp-N, nums[1]=ebp-N-4...) */
             if (context->proc_locals != NULL) {
@@ -976,6 +1043,30 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
             if (command->assignment.target.type == AST_TARGET_INDEXED) {
                 const ASTIndexedAccess *access = &command->assignment.target.indexed;
                 size_t base_offset;
+                ASTType indexed_base_type;
+
+                /* Safety net: reject string-indexed writes even if support check missed it. */
+                if (context->proc_locals != NULL) {
+                    size_t si;
+                    for (si = 0; si < context->proc_local_count; si++) {
+                        if (strcmp(context->proc_locals[si].name, access->name) == 0) {
+                            indexed_base_type = context->proc_locals[si].type;
+                            if (indexed_base_type == AST_TYPE_STRING) {
+                                return fail_string_index_codegen(
+                                    error,
+                                    command->assignment.target.line,
+                                    command->assignment.target.column);
+                            }
+                            break;
+                        }
+                    }
+                } else if (find_global_declaration_type(context->program, access->name, &indexed_base_type) &&
+                           indexed_base_type == AST_TYPE_STRING) {
+                    return fail_string_index_codegen(
+                        error,
+                        command->assignment.target.line,
+                        command->assignment.target.column);
+                }
 
                 /* Evaluate value first so address in edx is not clobbered by the expression. */
                 if (!generate_expression(context, command->assignment.expression, error)) {
@@ -1202,8 +1293,8 @@ static bool generate_push_expression(CodegenContext *context, const ASTExpressio
 }
 
 static bool generate_procedure(
-    const ASTProcedure *proc, StringBuilder *builder, const SizeList *for_loop_ids, size_t *next_label_id,
-    CompilerError *error) {
+    const ASTProcedure *proc, const ASTProgram *program, StringBuilder *builder, const SizeList *for_loop_ids,
+    size_t *next_label_id, CompilerError *error) {
     CodegenContext context;
     SizeList procedure_for_loop_ids = {0};
     size_t preview_next_label = next_label_id != NULL ? *next_label_id : 0;
@@ -1244,7 +1335,7 @@ static bool generate_procedure(
     context.for_loop_ids = for_loop_ids;
     context.procedure_for_loop_ids = &procedure_for_loop_ids;
     context.next_label_id = next_label_id != NULL ? *next_label_id : 0;
-    context.program = NULL;
+    context.program = program;
     context.semantic = NULL;
     context.current_proc_name = proc->name;
     context.parameters = proc->parameters;
@@ -1521,7 +1612,7 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
     }
 
     for (index = 0; index < program->procedure_count; index++) {
-        if (!generate_procedure(&program->procedures[index], &builder, &for_loop_ids, &context.next_label_id, error)) {
+        if (!generate_procedure(&program->procedures[index], program, &builder, &for_loop_ids, &context.next_label_id, error)) {
             goto fail;
         }
     }

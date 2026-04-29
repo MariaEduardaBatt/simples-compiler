@@ -683,6 +683,108 @@ void test_codegen_zero_initializes_local_integer_vector_storage(void) {
     free(assembly);
 }
 
+void test_codegen_emits_local_integer_vector_read_and_write(void) {
+    char *assembly = generate_source(
+        "procedimento vazio usa()\n"
+        "inicio\n"
+        "  inteiro nums[3];\n"
+        "  nums[0] <- 42;\n"
+        "  escreva nums[1];\n"
+        "  retorna;\n"
+        "fim\n"
+        "programa demo\n"
+        "inicio\n"
+        "  usa();\n"
+        "fim");
+
+    assert_contains(assembly, "neg eax");
+    assert_contains(assembly, "lea edx, [ebp + eax - 4]");
+    assert_contains(assembly, "mov dword [edx], eax");
+    assert_contains(assembly, "mov eax, dword [edx]");
+    free(assembly);
+}
+
+void test_codegen_procedure_local_vector_and_para_temporaries_do_not_overlap(void) {
+    char *assembly = generate_source(
+        "procedimento vazio preenche()\n"
+        "inicio\n"
+        "  inteiro nums[3];\n"
+        "  inteiro i;\n"
+        "  para i de 0 ate 2 passo 1 faca\n"
+        "    nums[i] <- i;\n"
+        "  fimpara\n"
+        "  retorna;\n"
+        "fim\n"
+        "programa demo\n"
+        "inicio\n"
+        "  preenche();\n"
+        "fim");
+
+    /* 3 vector slots + 1 scalar + 2 para temporaries = 6 slots = 24 bytes */
+    assert_contains(assembly, "sub esp, 24");
+    /* vector base offset is 4 (first local, 3 capacity slots) */
+    assert_contains(assembly, "lea edx, [ebp + eax - 4]");
+    /* for-loop end and step occupy slots 5 and 6 (offsets 20 and 24), not inside vector slots */
+    assert_contains(assembly, "mov dword [ebp-20], eax");
+    assert_contains(assembly, "mov dword [ebp-24], eax");
+    free(assembly);
+}
+
+void test_codegen_rejects_string_indexed_read_in_main_with_explicit_error(void) {
+    CompilerError error = {0};
+    char *assembly = generate_source_with_error(
+        "programa demo\n"
+        "string nome[10];\n"
+        "inteiro x;\n"
+        "inicio\n"
+        "  x <- nome[0];\n"
+        "fim",
+        &error);
+
+    TEST_ASSERT_NULL(assembly);
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
+    TEST_ASSERT_EQUAL_STRING(
+        "Code generation for string-indexed expressions is not supported yet.", error.message);
+}
+
+void test_codegen_rejects_string_indexed_write_in_main_with_explicit_error(void) {
+    CompilerError error = {0};
+    char *assembly = generate_source_with_error(
+        "programa demo\n"
+        "string nome[10];\n"
+        "inicio\n"
+        "  nome[0] <- 65;\n"
+        "fim",
+        &error);
+
+    TEST_ASSERT_NULL(assembly);
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
+    TEST_ASSERT_EQUAL_STRING(
+        "Code generation for string-indexed expressions is not supported yet.", error.message);
+}
+
+void test_codegen_rejects_string_indexed_read_in_procedure_with_explicit_error(void) {
+    CompilerError error = {0};
+    char *assembly = generate_source_with_error(
+        "procedimento vazio usa()\n"
+        "inicio\n"
+        "  string nome[10];\n"
+        "  inteiro x;\n"
+        "  x <- nome[0];\n"
+        "  retorna;\n"
+        "fim\n"
+        "programa demo\n"
+        "inicio\n"
+        "  usa();\n"
+        "fim",
+        &error);
+
+    TEST_ASSERT_NULL(assembly);
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
+    TEST_ASSERT_EQUAL_STRING(
+        "Code generation for string-indexed expressions is not supported yet.", error.message);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_codegen_emits_direct_store_for_integer_assignment);
@@ -724,5 +826,10 @@ int main(void) {
     RUN_TEST(test_codegen_rejects_indexed_assignment_target_with_internal_error);
     RUN_TEST(test_codegen_emits_scaled_addressing_for_global_integer_vector_element);
     RUN_TEST(test_codegen_zero_initializes_local_integer_vector_storage);
+    RUN_TEST(test_codegen_emits_local_integer_vector_read_and_write);
+    RUN_TEST(test_codegen_procedure_local_vector_and_para_temporaries_do_not_overlap);
+    RUN_TEST(test_codegen_rejects_string_indexed_read_in_main_with_explicit_error);
+    RUN_TEST(test_codegen_rejects_string_indexed_write_in_main_with_explicit_error);
+    RUN_TEST(test_codegen_rejects_string_indexed_read_in_procedure_with_explicit_error);
     return UNITY_END();
 }
