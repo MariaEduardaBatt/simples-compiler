@@ -892,6 +892,38 @@ void test_codegen_local_string_write_uses_frame_address(void) {
     free(assembly);
 }
 
+void test_codegen_rejects_string_literal_escreva_with_explicit_error(void) {
+    CompilerError error = {0};
+    char *assembly = generate_source_with_error(
+        "programa demo\n"
+        "string nome[8];\n"
+        "inicio\n"
+        "  escreva \"abc\";\n"
+        "fim",
+        &error);
+
+    TEST_ASSERT_NULL(assembly);
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
+    TEST_ASSERT_EQUAL_STRING(
+        "Code generation for string literal write expressions is not supported yet.", error.message);
+}
+
+void test_codegen_rejects_string_literal_escreval_with_explicit_error(void) {
+    CompilerError error = {0};
+    char *assembly = generate_source_with_error(
+        "programa demo\n"
+        "string nome[8];\n"
+        "inicio\n"
+        "  escreval \"abc\";\n"
+        "fim",
+        &error);
+
+    TEST_ASSERT_NULL(assembly);
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
+    TEST_ASSERT_EQUAL_STRING(
+        "Code generation for string literal write expressions is not supported yet.", error.message);
+}
+
 void test_codegen_local_string_and_scalar_have_non_overlapping_frame_offsets(void) {
     char *assembly = generate_source(
         "procedimento vazio usa()\n"
@@ -966,5 +998,7 @@ int main(void) {
     RUN_TEST(test_codegen_local_string_read_uses_frame_address);
     RUN_TEST(test_codegen_local_string_write_uses_frame_address);
     RUN_TEST(test_codegen_local_string_and_scalar_have_non_overlapping_frame_offsets);
+    RUN_TEST(test_codegen_rejects_string_literal_escreva_with_explicit_error);
+    RUN_TEST(test_codegen_rejects_string_literal_escreval_with_explicit_error);
     return UNITY_END();
 }

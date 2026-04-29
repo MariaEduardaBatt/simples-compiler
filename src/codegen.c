@@ -983,7 +983,7 @@ static bool procedure_supports_integer_backend(const ASTProcedure *procedure, Co
 static bool generate_string_literal_copy(
     CodegenContext *context, const char *target_name, const char *literal) {
     StringBuilder *builder = context->builder;
-    size_t i, len;
+    size_t i, j, len;
 
     /* Local string targets: emit frame-based byte stores. */
     if (context->proc_locals != NULL) {
@@ -1002,10 +1002,10 @@ static bool generate_string_literal_copy(
                         base_offset, (unsigned char)literal[0])) {
                     return false;
                 }
-                for (i = 1; i < len; i++) {
+                for (j = 1; j < len; j++) {
                     if (!builder_appendf(
                             builder, "    mov byte [ebp-%zu], '%c'\n",
-                            base_offset - i, (unsigned char)literal[i])) {
+                            base_offset - j, (unsigned char)literal[j])) {
                         return false;
                     }
                 }
@@ -1113,6 +1113,14 @@ static bool generate_expression(CodegenContext *context, const ASTExpression *ex
     switch (expression->type) {
         case AST_EXPR_INT:
             return builder_appendf(builder, "    mov eax, %d\n", expression->int_value);
+        case AST_EXPR_STRING:
+            compiler_error_set(
+                error,
+                COMPILER_PHASE_CODEGEN,
+                expression->line,
+                expression->column,
+                "Code generation for string literal write expressions is not supported yet.");
+            return false;
         case AST_EXPR_FLOAT:
             return fail_float_expression_codegen(error, expression->line, expression->column);
         case AST_EXPR_IDENTIFIER:
