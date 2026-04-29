@@ -11,7 +11,7 @@
 #include <string.h>
 
 bool codegen_debug_resolve_procedure_for_loop_offsets(
-    size_t proc_local_count,
+    size_t proc_local_frame_bytes,
     const size_t *procedure_for_loop_ids,
     size_t procedure_for_loop_id_count,
     size_t label_id,
@@ -237,8 +237,10 @@ void test_codegen_reports_explicit_error_when_procedure_for_loop_slot_layout_ove
     size_t end_offset = 0;
     size_t step_offset = 0;
 
+    /* With the byte-based formula end_offset = proc_local_bytes + (index*2+1)*4,
+       pass SIZE_MAX-3 so that SIZE_MAX-3+4 wraps to 0 and triggers the overflow guard. */
     TEST_ASSERT_FALSE(codegen_debug_resolve_procedure_for_loop_offsets(
-        (size_t)-1, loop_ids, 1, 3, &end_offset, &step_offset, &error, 4, 8));
+        (size_t)-4, loop_ids, 1, 3, &end_offset, &step_offset, &error, 4, 8));
     TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
     TEST_ASSERT_EQUAL_STRING(
         "Internal error: invalid procedure-for-loop temporary slot layout.", error.message);
@@ -814,6 +816,103 @@ void test_codegen_rejects_string_indexed_read_in_procedure_with_explicit_error(v
         "Code generation for string-indexed expressions is not supported yet.", error.message);
 }
 
+void test_codegen_local_string_frame_reserves_n_bytes_not_dwords(void) {
+    char *assembly = generate_source(
+        "procedimento vazio usa()\n"
+        "inicio\n"
+        "  string nome[8];\n"
+        "  retorna;\n"
+        "fim\n"
+        "programa demo\n"
+        "inicio\n"
+        "  usa();\n"
+        "fim");
+
+    /* string[8] must reserve 8 bytes, not 8*4=32 bytes */
+    assert_contains(assembly, "sub esp, 8");
+    TEST_ASSERT_NULL(strstr(assembly, "sub esp, 32"));
+    free(assembly);
+}
+
+void test_codegen_local_string_literal_assignment_emits_frame_byte_stores(void) {
+    char *assembly = generate_source(
+        "procedimento vazio usa()\n"
+        "inicio\n"
+        "  string nome[8];\n"
+        "  nome <- \"hi\";\n"
+        "  retorna;\n"
+        "fim\n"
+        "programa demo\n"
+        "inicio\n"
+        "  usa();\n"
+        "fim");
+
+    /* string[8] at base_offset=8: byte 0 at [ebp-8], byte 1 at [ebp-7], null at [ebp-6] */
+    assert_contains(assembly, "mov byte [ebp-8], 'h'");
+    assert_contains(assembly, "mov byte [ebp-7], 'i'");
+    assert_contains(assembly, "mov byte [ebp-6], 0");
+    free(assembly);
+}
+
+void test_codegen_local_string_read_uses_frame_address(void) {
+    char *assembly = generate_source(
+        "procedimento vazio usa()\n"
+        "inicio\n"
+        "  string nome[8];\n"
+        "  leia nome;\n"
+        "  retorna;\n"
+        "fim\n"
+        "programa demo\n"
+        "inicio\n"
+        "  usa();\n"
+        "fim");
+
+    /* string[8] at base_offset=8: lea eax, [ebp-8] */
+    assert_contains(assembly, "lea eax, [ebp-8]");
+    assert_contains(assembly, "call read_string");
+    free(assembly);
+}
+
+void test_codegen_local_string_write_uses_frame_address(void) {
+    char *assembly = generate_source(
+        "procedimento vazio usa()\n"
+        "inicio\n"
+        "  string nome[8];\n"
+        "  escreval nome;\n"
+        "  retorna;\n"
+        "fim\n"
+        "programa demo\n"
+        "inicio\n"
+        "  usa();\n"
+        "fim");
+
+    /* string[8] at base_offset=8: lea eax, [ebp-8] */
+    assert_contains(assembly, "lea eax, [ebp-8]");
+    assert_contains(assembly, "call print_string");
+    free(assembly);
+}
+
+void test_codegen_local_string_and_scalar_have_non_overlapping_frame_offsets(void) {
+    char *assembly = generate_source(
+        "procedimento vazio usa()\n"
+        "inicio\n"
+        "  string nome[8];\n"
+        "  inteiro x;\n"
+        "  x <- 42;\n"
+        "  retorna;\n"
+        "fim\n"
+        "programa demo\n"
+        "inicio\n"
+        "  usa();\n"
+        "fim");
+
+    /* string[8]: 8 bytes + scalar: 4 bytes = 12 total */
+    assert_contains(assembly, "sub esp, 12");
+    /* scalar x at base_offset=12: dword at [ebp-12] */
+    assert_contains(assembly, "mov dword [ebp-12], 42");
+    free(assembly);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_codegen_emits_direct_store_for_integer_assignment);
@@ -862,5 +961,10 @@ int main(void) {
     RUN_TEST(test_codegen_rejects_string_indexed_read_in_procedure_with_explicit_error);
     RUN_TEST(test_codegen_copies_string_literal_into_fixed_buffer);
     RUN_TEST(test_codegen_emits_string_write_loop_for_escreval);
+    RUN_TEST(test_codegen_local_string_frame_reserves_n_bytes_not_dwords);
+    RUN_TEST(test_codegen_local_string_literal_assignment_emits_frame_byte_stores);
+    RUN_TEST(test_codegen_local_string_read_uses_frame_address);
+    RUN_TEST(test_codegen_local_string_write_uses_frame_address);
+    RUN_TEST(test_codegen_local_string_and_scalar_have_non_overlapping_frame_offsets);
     return UNITY_END();
 }

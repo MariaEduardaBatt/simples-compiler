@@ -31,8 +31,8 @@ typedef struct {
     const ASTParameter *parameters;
     size_t parameter_count;
     const ASTDeclaration *proc_locals;
-    size_t proc_local_count;       /* number of local declarations (for iteration) */
-    size_t proc_local_slot_count;  /* total frame slots for locals (vectors expand to capacity) */
+    size_t proc_local_count;        /* number of local declarations (for iteration) */
+    size_t proc_local_frame_bytes;  /* aligned byte count of local frame (used for for-loop temp offsets) */
 } CodegenContext;
 
 static bool builder_reserve(StringBuilder *builder, size_t extra_length) {
@@ -158,26 +158,47 @@ static bool builder_append_user_symbol_declaration(StringBuilder *builder, const
            builder_append(builder, " dd 0\n");
 }
 
-/* Returns the number of frame slots a list of local declarations occupies.
-   Vector locals expand to capacity slots; scalars use 1. */
-static size_t compute_local_slot_count(const ASTDeclaration *locals, size_t count) {
-    size_t i, slots = 0;
+/* Returns the total frame bytes occupied by a list of local declarations.
+   String vectors reserve capacity bytes; integer vectors reserve capacity*4 bytes; scalars 4 bytes. */
+static size_t compute_local_frame_bytes(const ASTDeclaration *locals, size_t count) {
+    size_t i, bytes = 0;
 
     for (i = 0; i < count; i++) {
-        slots += (locals[i].storage == AST_STORAGE_INDEXED) ? locals[i].capacity : 1;
+        if (locals[i].storage == AST_STORAGE_INDEXED && locals[i].type == AST_TYPE_STRING) {
+            bytes += locals[i].capacity;
+        } else if (locals[i].storage == AST_STORAGE_INDEXED) {
+            bytes += locals[i].capacity * 4;
+        } else {
+            bytes += 4;
+        }
     }
-    return slots;
+    return bytes;
 }
 
 /* Returns the ebp-relative base offset (positive) for local declaration[target_index].
-   First slot is at ebp-4, subsequent slots at ebp-8, etc. */
+   For scalars and integer vectors [ebp-offset] addresses the first/only dword element.
+   For strings [ebp-offset] addresses byte 0, with subsequent bytes at increasing addresses
+   ([ebp-offset+1], [ebp-offset+2], …) so the layout is compatible with print_string/read_string. */
 static size_t local_declaration_frame_offset(const ASTDeclaration *proc_locals, size_t target_index) {
-    size_t i, slot = 0;
+    size_t i, bytes = 0;
 
     for (i = 0; i < target_index; i++) {
-        slot += (proc_locals[i].storage == AST_STORAGE_INDEXED) ? proc_locals[i].capacity : 1;
+        if (proc_locals[i].storage == AST_STORAGE_INDEXED && proc_locals[i].type == AST_TYPE_STRING) {
+            bytes += proc_locals[i].capacity;
+        } else if (proc_locals[i].storage == AST_STORAGE_INDEXED) {
+            bytes += proc_locals[i].capacity * 4;
+        } else {
+            bytes += 4;
+        }
     }
-    return (slot + 1) * 4;
+    /* Add the target variable's own contribution to find its base offset. */
+    if (proc_locals[target_index].storage == AST_STORAGE_INDEXED &&
+        proc_locals[target_index].type == AST_TYPE_STRING) {
+        bytes += proc_locals[target_index].capacity;
+    } else {
+        bytes += 4;
+    }
+    return bytes;
 }
 
 /* Returns the ebp-relative base offset of the named local, or 0 if not found. */
@@ -495,7 +516,7 @@ static bool fail_codegen_internal(CompilerError *error, int line, int column, co
 }
 
 static bool resolve_procedure_for_loop_offsets(
-    size_t proc_local_count,
+    size_t proc_local_frame_bytes,
     const SizeList *procedure_for_loop_ids,
     size_t label_id,
     size_t *end_offset,
@@ -513,10 +534,10 @@ static bool resolve_procedure_for_loop_offsets(
     for (index = 0; index < procedure_for_loop_ids->count; ++index) {
         if (procedure_for_loop_ids->items[index] == label_id) {
             if (end_offset != NULL) {
-                *end_offset = (proc_local_count + index * 2 + 1) * 4;
+                *end_offset = proc_local_frame_bytes + (index * 2 + 1) * 4;
             }
             if (step_offset != NULL) {
-                *step_offset = (proc_local_count + index * 2 + 2) * 4;
+                *step_offset = proc_local_frame_bytes + (index * 2 + 2) * 4;
             }
 
             if ((end_offset != NULL && *end_offset == 0) || (step_offset != NULL && *step_offset == 0)) {
@@ -964,11 +985,31 @@ static bool generate_string_literal_copy(
     StringBuilder *builder = context->builder;
     size_t i, len;
 
-    /* Fail for local string targets: frame byte layout is not yet implemented. */
+    /* Local string targets: emit frame-based byte stores. */
     if (context->proc_locals != NULL) {
         for (i = 0; i < context->proc_local_count; i++) {
             if (strcmp(context->proc_locals[i].name, target_name) == 0) {
-                return false;
+                size_t base_offset = local_declaration_frame_offset(context->proc_locals, i);
+                len = (literal != NULL) ? strlen(literal) : 0;
+
+                if (len == 0) {
+                    return builder_appendf(builder, "    mov byte [ebp-%zu], 0\n", base_offset);
+                }
+
+                /* byte 0 at [ebp-base_offset], byte j at [ebp-(base_offset-j)] */
+                if (!builder_appendf(
+                        builder, "    mov byte [ebp-%zu], '%c'\n",
+                        base_offset, (unsigned char)literal[0])) {
+                    return false;
+                }
+                for (i = 1; i < len; i++) {
+                    if (!builder_appendf(
+                            builder, "    mov byte [ebp-%zu], '%c'\n",
+                            base_offset - i, (unsigned char)literal[i])) {
+                        return false;
+                    }
+                }
+                return builder_appendf(builder, "    mov byte [ebp-%zu], 0\n", base_offset - len);
             }
         }
     }
@@ -1406,7 +1447,7 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
 
             if (context->current_proc_name != NULL) {
                 if (!resolve_procedure_for_loop_offsets(
-                        context->proc_local_slot_count,
+                        context->proc_local_frame_bytes,
                         context->procedure_for_loop_ids,
                         label_id,
                         &end_offset,
@@ -1509,8 +1550,9 @@ static bool generate_procedure(
     CodegenContext context;
     SizeList procedure_for_loop_ids = {0};
     size_t preview_next_label = next_label_id != NULL ? *next_label_id : 0;
-    size_t total_local_slots;
-    size_t total_stack_slots = 0;
+    size_t total_local_bytes;
+    size_t total_local_bytes_aligned;
+    size_t total_frame_bytes = 0;
     size_t slot_index;
 
     if (!collect_for_loop_ids_in_block(
@@ -1519,8 +1561,9 @@ static bool generate_procedure(
         return false;
     }
 
-    total_local_slots = compute_local_slot_count(proc->local_declarations, proc->local_declaration_count);
-    total_stack_slots = total_local_slots + procedure_for_loop_ids.count * 2;
+    total_local_bytes = compute_local_frame_bytes(proc->local_declarations, proc->local_declaration_count);
+    total_local_bytes_aligned = (total_local_bytes + 3) & ~(size_t)3;
+    total_frame_bytes = total_local_bytes_aligned + procedure_for_loop_ids.count * 2 * 4;
 
     if (!builder_appendf(builder, "\nproc_%s:\n", proc->name) ||
         !builder_append(builder, "    push ebp\n    mov ebp, esp\n")) {
@@ -1528,13 +1571,13 @@ static bool generate_procedure(
         return false;
     }
 
-    if (total_stack_slots > 0) {
-        if (!builder_appendf(builder, "    sub esp, %zu\n", total_stack_slots * 4)) {
+    if (total_frame_bytes > 0) {
+        if (!builder_appendf(builder, "    sub esp, %zu\n", total_frame_bytes)) {
             free(procedure_for_loop_ids.items);
             return false;
         }
 
-        for (slot_index = 0; slot_index < total_stack_slots; ++slot_index) {
+        for (slot_index = 0; slot_index < total_frame_bytes / 4; ++slot_index) {
             if (!builder_appendf(builder, "    mov dword [ebp-%zu], 0\n", (slot_index + 1) * 4)) {
                 free(procedure_for_loop_ids.items);
                 return false;
@@ -1553,7 +1596,7 @@ static bool generate_procedure(
     context.parameter_count = proc->parameter_count;
     context.proc_locals = proc->local_declarations;
     context.proc_local_count = proc->local_declaration_count;
-    context.proc_local_slot_count = total_local_slots;
+    context.proc_local_frame_bytes = total_local_bytes_aligned;
 
     if (!generate_command_block(&context, proc->commands, proc->command_count, error)) {
         free(procedure_for_loop_ids.items);
@@ -1576,7 +1619,7 @@ static bool generate_procedure(
 
 #ifdef CODEGEN_TESTING
 bool codegen_debug_resolve_procedure_for_loop_offsets(
-    size_t proc_local_count,
+    size_t proc_local_frame_bytes,
     const size_t *procedure_for_loop_ids,
     size_t procedure_for_loop_id_count,
     size_t label_id,
@@ -1592,8 +1635,8 @@ bool codegen_debug_resolve_procedure_for_loop_offsets(
     };
 
     return resolve_procedure_for_loop_offsets(
-        proc_local_count, procedure_for_loop_ids != NULL ? &list : NULL, label_id, end_offset, step_offset, error, line,
-        column);
+        proc_local_frame_bytes, procedure_for_loop_ids != NULL ? &list : NULL, label_id, end_offset, step_offset, error,
+        line, column);
 }
 #endif
 
@@ -1817,7 +1860,7 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
     context.parameter_count = 0;
     context.proc_locals = NULL;
     context.proc_local_count = 0;
-    context.proc_local_slot_count = 0;
+    context.proc_local_frame_bytes = 0;
 
     if (!generate_command_block(&context, program->commands, program->command_count, error)) {
         goto fail;
