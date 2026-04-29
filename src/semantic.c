@@ -8,6 +8,7 @@ typedef struct {
     char *name;
     ASTType type;
     ASTStorageKind storage;
+    size_t capacity;
 } TypedSymbol;
 
 typedef struct {
@@ -132,7 +133,8 @@ static bool typed_scope_contains(const TypedScope *scope, const char *name) {
     return false;
 }
 
-static bool typed_scope_append(TypedScope *scope, const char *name, ASTType type, ASTStorageKind storage) {
+static bool typed_scope_append(
+    TypedScope *scope, const char *name, ASTType type, ASTStorageKind storage, size_t capacity) {
     TypedSymbol *symbols;
     char *copy;
 
@@ -151,11 +153,17 @@ static bool typed_scope_append(TypedScope *scope, const char *name, ASTType type
     scope->symbols[scope->count].name = copy;
     scope->symbols[scope->count].type = type;
     scope->symbols[scope->count].storage = storage;
+    scope->symbols[scope->count].capacity = capacity;
     scope->count++;
     return true;
 }
 
-static bool typed_scope_lookup(const TypedScope *scope, const char *name, ASTType *out_type, ASTStorageKind *out_storage) {
+static bool typed_scope_lookup(
+    const TypedScope *scope,
+    const char *name,
+    ASTType *out_type,
+    ASTStorageKind *out_storage,
+    size_t *out_capacity) {
     size_t index;
 
     for (index = 0; index < scope->count; ++index) {
@@ -165,6 +173,9 @@ static bool typed_scope_lookup(const TypedScope *scope, const char *name, ASTTyp
             }
             if (out_storage != NULL) {
                 *out_storage = scope->symbols[index].storage;
+            }
+            if (out_capacity != NULL) {
+                *out_capacity = scope->symbols[index].capacity;
             }
             return true;
         }
@@ -177,7 +188,7 @@ static bool semantic_check_identifier(
     const TypedScope *scope, const char *name, int line, int column, ASTType *out_type, CompilerError *error) {
     char message[256];
 
-    if (typed_scope_lookup(scope, name, out_type, NULL)) {
+    if (typed_scope_lookup(scope, name, out_type, NULL, NULL)) {
         return true;
     }
 
@@ -406,7 +417,8 @@ static bool analyze_expression(const ASTExpression *expression, const SemanticCo
             ASTType identifier_type;
             char id_message[256];
 
-            if (!typed_scope_lookup(ctx->scope, expression->identifier, &identifier_type, &identifier_storage)) {
+            if (!typed_scope_lookup(
+                    ctx->scope, expression->identifier, &identifier_type, &identifier_storage, NULL)) {
                 snprintf(id_message, sizeof(id_message), "Identificador '%s' nao declarado.", expression->identifier);
                 return semantic_fail_at(error, expression->line, expression->column, id_message);
             }
@@ -420,7 +432,7 @@ static bool analyze_expression(const ASTExpression *expression, const SemanticCo
             return true;
         }
         case AST_EXPR_INDEX:
-            if (!typed_scope_lookup(ctx->scope, expression->index_access.name, &base_type, &base_storage)) {
+            if (!typed_scope_lookup(ctx->scope, expression->index_access.name, &base_type, &base_storage, NULL)) {
                 snprintf(message, sizeof(message), "Identificador '%s' nao declarado.", expression->index_access.name);
                 return semantic_fail_at(error, expression->index_access.line, expression->index_access.column, message);
             }
@@ -460,6 +472,7 @@ static bool analyze_command_list(
 static bool analyze_assignment_command(const ASTAssignmentCommand *assignment, const SemanticContext *ctx, CompilerError *error) {
     ASTType variable_type;
     ASTStorageKind variable_storage;
+    size_t variable_capacity = 0;
     ASTType expression_type;
     ASTType index_type;
     char message[256];
@@ -469,7 +482,7 @@ static bool analyze_assignment_command(const ASTAssignmentCommand *assignment, c
     int target_line = assignment->target.line;
     int target_column = assignment->target.column;
 
-    if (!typed_scope_lookup(ctx->scope, target_name, &variable_type, &variable_storage)) {
+    if (!typed_scope_lookup(ctx->scope, target_name, &variable_type, &variable_storage, &variable_capacity)) {
         snprintf(message, sizeof(message), "Identificador '%s' nao declarado.", target_name);
         return semantic_fail_at(error, target_line, target_column, message);
     }
@@ -497,6 +510,24 @@ static bool analyze_assignment_command(const ASTAssignmentCommand *assignment, c
 
     if (!analyze_expression(assignment->expression, ctx, &expression_type, error)) {
         return false;
+    }
+
+    if (assignment->target.type == AST_TARGET_IDENTIFIER &&
+        variable_type == AST_TYPE_STRING &&
+        variable_storage == AST_STORAGE_INDEXED &&
+        assignment->expression->type == AST_EXPR_STRING) {
+        size_t literal_length = strlen(assignment->expression->string_value);
+
+        if (literal_length + 1 > variable_capacity) {
+            snprintf(
+                message,
+                sizeof(message),
+                "Literal de string com %zu bytes excede capacidade %zu de '%s'.",
+                literal_length,
+                variable_capacity,
+                target_name);
+            return semantic_fail_expression(assignment->expression, error, message);
+        }
     }
 
     if (assignment->target.type == AST_TARGET_IDENTIFIER
@@ -626,7 +657,7 @@ static bool analyze_command(
             ASTType read_type;
             char read_message[256];
 
-            if (!typed_scope_lookup(ctx->scope, command->read.name, &read_type, &read_storage)) {
+            if (!typed_scope_lookup(ctx->scope, command->read.name, &read_type, &read_storage, NULL)) {
                 snprintf(read_message, sizeof(read_message), "Identificador '%s' nao declarado.", command->read.name);
                 return semantic_fail_at(error, command->read.line, command->read.column, read_message);
             }
@@ -743,7 +774,12 @@ static bool analyze_procedure(const ASTProcedure *procedure, const SemanticInfo 
                 error, procedure->parameters[index].line, procedure->parameters[index].column, message);
         }
 
-        if (!typed_scope_append(&scope, procedure->parameters[index].name, procedure->parameters[index].type, AST_STORAGE_SCALAR)) {
+        if (!typed_scope_append(
+                &scope,
+                procedure->parameters[index].name,
+                procedure->parameters[index].type,
+                AST_STORAGE_SCALAR,
+                0)) {
             typed_scope_free(&scope);
             return semantic_fail(error, "Memoria insuficiente.");
         }
@@ -763,7 +799,7 @@ static bool analyze_procedure(const ASTProcedure *procedure, const SemanticInfo 
             return semantic_fail_declaration(decl, error, "Declaracao de string requer capacidade fixa.");
         }
 
-        if (!typed_scope_append(&scope, decl->name, decl->type, decl->storage)) {
+        if (!typed_scope_append(&scope, decl->name, decl->type, decl->storage, decl->capacity)) {
             typed_scope_free(&scope);
             return semantic_fail(error, "Memoria insuficiente.");
         }
@@ -874,7 +910,7 @@ bool analyze_program(const ASTProgram *program, SemanticInfo *out_info, Compiler
         }
 
         if (!semantic_info_append_global(&info, decl) ||
-            !typed_scope_append(&global_scope, decl->name, decl->type, decl->storage)) {
+            !typed_scope_append(&global_scope, decl->name, decl->type, decl->storage, decl->capacity)) {
             semantic_info_free(&info);
             typed_scope_free(&global_scope);
             return semantic_fail(error, "Memoria insuficiente.");

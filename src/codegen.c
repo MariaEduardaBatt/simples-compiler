@@ -1113,6 +1113,14 @@ static bool builder_append_string_literal_bytes(StringBuilder *builder, const ch
     return builder_append(builder, "0");
 }
 
+static bool builder_append_nasm_byte_literal(StringBuilder *builder, unsigned char ch) {
+    if (ch == '\'' || ch == '\\' || ch < 32 || ch > 126) {
+        return builder_appendf(builder, "%u", (unsigned int)ch);
+    }
+
+    return builder_appendf(builder, "'%c'", (char)ch);
+}
+
 static bool emit_string_literal_declarations(StringBuilder *builder, const StringLiteralList *list) {
     size_t index;
 
@@ -1162,15 +1170,15 @@ static bool generate_string_literal_copy(
                 }
 
                 /* byte 0 at [ebp-base_offset], byte j at [ebp-(base_offset-j)] */
-                if (!builder_appendf(
-                        builder, "    mov byte [ebp-%zu], '%c'\n",
-                        base_offset, (unsigned char)literal[0])) {
+                if (!builder_appendf(builder, "    mov byte [ebp-%zu], ", base_offset) ||
+                    !builder_append_nasm_byte_literal(builder, (unsigned char)literal[0]) ||
+                    !builder_append(builder, "\n")) {
                     return false;
                 }
                 for (j = 1; j < len; j++) {
-                    if (!builder_appendf(
-                            builder, "    mov byte [ebp-%zu], '%c'\n",
-                            base_offset - j, (unsigned char)literal[j])) {
+                    if (!builder_appendf(builder, "    mov byte [ebp-%zu], ", base_offset - j) ||
+                        !builder_append_nasm_byte_literal(builder, (unsigned char)literal[j]) ||
+                        !builder_append(builder, "\n")) {
                         return false;
                     }
                 }
@@ -1185,12 +1193,16 @@ static bool generate_string_literal_copy(
         return builder_appendf(builder, "    mov byte [%s], 0\n", target_name);
     }
 
-    if (!builder_appendf(builder, "    mov byte [%s], '%c'\n", target_name, (unsigned char)literal[0])) {
+    if (!builder_appendf(builder, "    mov byte [%s], ", target_name) ||
+        !builder_append_nasm_byte_literal(builder, (unsigned char)literal[0]) ||
+        !builder_append(builder, "\n")) {
         return false;
     }
 
     for (i = 1; i < len; i++) {
-        if (!builder_appendf(builder, "    mov byte [%s+%zu], '%c'\n", target_name, i, (unsigned char)literal[i])) {
+        if (!builder_appendf(builder, "    mov byte [%s+%zu], ", target_name, i) ||
+            !builder_append_nasm_byte_literal(builder, (unsigned char)literal[i]) ||
+            !builder_append(builder, "\n")) {
             return false;
         }
     }

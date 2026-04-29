@@ -846,6 +846,20 @@ void test_codegen_local_string_literal_assignment_emits_frame_byte_stores(void) 
     free(assembly);
 }
 
+void test_codegen_string_literal_assignment_escapes_apostrophes_in_byte_stores(void) {
+    char *assembly = generate_source(
+        "programa demo\n"
+        "string nome[8];\n"
+        "inicio\n"
+        "  nome <- \"d'agua\";\n"
+        "fim");
+
+    assert_contains(assembly, "mov byte [nome], 'd'");
+    assert_contains(assembly, "mov byte [nome+1], 39");
+    assert_contains(assembly, "mov byte [nome+2], 'a'");
+    free(assembly);
+}
+
 void test_codegen_local_string_read_uses_frame_address(void) {
     char *assembly = generate_source(
         "procedimento vazio usa()\n"
@@ -1004,6 +1018,7 @@ int main(void) {
     RUN_TEST(test_codegen_emits_string_write_loop_for_escreval);
     RUN_TEST(test_codegen_local_string_frame_reserves_n_bytes_not_dwords);
     RUN_TEST(test_codegen_local_string_literal_assignment_emits_frame_byte_stores);
+    RUN_TEST(test_codegen_string_literal_assignment_escapes_apostrophes_in_byte_stores);
     RUN_TEST(test_codegen_local_string_read_uses_frame_address);
     RUN_TEST(test_codegen_local_string_write_uses_frame_address);
     RUN_TEST(test_codegen_local_string_and_scalar_have_non_overlapping_frame_offsets);

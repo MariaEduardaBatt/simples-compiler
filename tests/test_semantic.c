@@ -543,6 +543,26 @@ void test_semantic_rejects_string_without_capacity(void) {
     token_list_free(&tokens);
 }
 
+void test_semantic_rejects_string_literal_that_exceeds_capacity(void) {
+    const char *source =
+        "programa demo\n"
+        "string nome[4];\n"
+        "inicio\n"
+        "  nome <- \"abcd\";\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL_STRING("Literal de string com 4 bytes excede capacidade 4 de 'nome'.", error.message);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
 void test_semantic_rejects_scalar_identifier_indexing(void) {
     const char *source =
         "programa demo\n"
@@ -814,6 +834,7 @@ int main(void) {
     RUN_TEST(test_semantic_rejects_non_void_procedure_without_return_on_all_paths);
     RUN_TEST(test_semantic_accepts_program_and_collects_procedure_signatures);
     RUN_TEST(test_semantic_rejects_string_without_capacity);
+    RUN_TEST(test_semantic_rejects_string_literal_that_exceeds_capacity);
     RUN_TEST(test_semantic_rejects_scalar_identifier_indexing);
     RUN_TEST(test_semantic_rejects_scalar_identifier_indexing_in_assignment_target);
     RUN_TEST(test_semantic_rejects_vector_in_write_expression);
