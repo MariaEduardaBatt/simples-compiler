@@ -132,7 +132,7 @@ ld -m elf_i386 programa.o -o programa
                       "inicio" <declaracoes_locais> <comandos> "fim"
 <parametros>      ::= <parametro> { "," <parametro> }
 <parametro>       ::= <tipo> ID
-<tipo_retorno>    ::= "inteiro" | "flutuante" | "string" | "vazio"
+<tipo_retorno>    ::= "inteiro" | "flutuante" | "vazio"
 
 <declaracoes_globais> ::= { <declaracao> }
 <declaracoes_locais>  ::= { <declaracao> }
@@ -856,6 +856,7 @@ Todas invocadas via `int 0x80`.
 ## Out of Scope (v1.0)
 
 - Geração de código para procedimentos `flutuante` (sintaxe e semântica aceitas; backend rejeita explicitamente)
+- Assinaturas de procedimento com `string` (parâmetros e retorno)
 - Matrizes 2D
 - Otimizações de código (constant folding, dead code elimination)
 - Suporte a Windows (PE/COFF)

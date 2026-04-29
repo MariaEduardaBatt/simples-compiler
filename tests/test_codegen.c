@@ -732,37 +732,32 @@ void test_codegen_procedure_local_vector_and_para_temporaries_do_not_overlap(voi
     free(assembly);
 }
 
-void test_codegen_rejects_string_indexed_read_in_main_with_explicit_error(void) {
-    CompilerError error = {0};
-    char *assembly = generate_source_with_error(
+void test_codegen_emits_byte_load_for_string_indexed_read_in_main(void) {
+    char *assembly = generate_source(
         "programa demo\n"
         "string nome[10];\n"
         "inteiro x;\n"
         "inicio\n"
         "  x <- nome[0];\n"
-        "fim",
-        &error);
+        "fim");
 
-    TEST_ASSERT_NULL(assembly);
-    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
-    TEST_ASSERT_EQUAL_STRING(
-        "Code generation for string-indexed expressions is not supported yet.", error.message);
+    assert_contains(assembly, "lea edx, [nome + eax]");
+    assert_contains(assembly, "movzx eax, byte [edx]");
+    assert_contains(assembly, "mov dword [x], eax");
+    free(assembly);
 }
 
-void test_codegen_rejects_string_indexed_write_in_main_with_explicit_error(void) {
-    CompilerError error = {0};
-    char *assembly = generate_source_with_error(
+void test_codegen_emits_byte_store_for_string_indexed_write_in_main(void) {
+    char *assembly = generate_source(
         "programa demo\n"
         "string nome[10];\n"
         "inicio\n"
         "  nome[0] <- 65;\n"
-        "fim",
-        &error);
+        "fim");
 
-    TEST_ASSERT_NULL(assembly);
-    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
-    TEST_ASSERT_EQUAL_STRING(
-        "Code generation for string-indexed expressions is not supported yet.", error.message);
+    assert_contains(assembly, "lea edx, [nome + eax]");
+    assert_contains(assembly, "mov byte [edx], al");
+    free(assembly);
 }
 
 void test_codegen_copies_string_literal_into_fixed_buffer(void) {
@@ -794,9 +789,8 @@ void test_codegen_emits_string_write_loop_for_escreval(void) {
     free(assembly);
 }
 
-void test_codegen_rejects_string_indexed_read_in_procedure_with_explicit_error(void) {
-    CompilerError error = {0};
-    char *assembly = generate_source_with_error(
+void test_codegen_emits_local_string_indexed_read_in_procedure(void) {
+    char *assembly = generate_source(
         "procedimento vazio usa()\n"
         "inicio\n"
         "  string nome[10];\n"
@@ -807,13 +801,11 @@ void test_codegen_rejects_string_indexed_read_in_procedure_with_explicit_error(v
         "programa demo\n"
         "inicio\n"
         "  usa();\n"
-        "fim",
-        &error);
+        "fim");
 
-    TEST_ASSERT_NULL(assembly);
-    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
-    TEST_ASSERT_EQUAL_STRING(
-        "Code generation for string-indexed expressions is not supported yet.", error.message);
+    assert_contains(assembly, "lea edx, [ebp + eax - 10]");
+    assert_contains(assembly, "movzx eax, byte [edx]");
+    free(assembly);
 }
 
 void test_codegen_local_string_frame_reserves_n_bytes_not_dwords(void) {
@@ -892,36 +884,53 @@ void test_codegen_local_string_write_uses_frame_address(void) {
     free(assembly);
 }
 
-void test_codegen_rejects_string_literal_escreva_with_explicit_error(void) {
-    CompilerError error = {0};
-    char *assembly = generate_source_with_error(
+void test_codegen_emits_string_literal_escreva_via_literal_label(void) {
+    char *assembly = generate_source(
         "programa demo\n"
         "string nome[8];\n"
         "inicio\n"
         "  escreva \"abc\";\n"
-        "fim",
-        &error);
+        "fim");
 
-    TEST_ASSERT_NULL(assembly);
-    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
-    TEST_ASSERT_EQUAL_STRING(
-        "Code generation for string literal write expressions is not supported yet.", error.message);
+    assert_contains(assembly, "_strlit_0 db 'a', 'b', 'c', 0");
+    assert_contains(assembly, "mov eax, _strlit_0");
+    assert_contains(assembly, "call print_string");
+    TEST_ASSERT_NULL(strstr(assembly, "call print_newline"));
+    free(assembly);
 }
 
-void test_codegen_rejects_string_literal_escreval_with_explicit_error(void) {
-    CompilerError error = {0};
-    char *assembly = generate_source_with_error(
+void test_codegen_emits_string_literal_escreval_via_literal_label(void) {
+    char *assembly = generate_source(
         "programa demo\n"
         "string nome[8];\n"
         "inicio\n"
         "  escreval \"abc\";\n"
+        "fim");
+
+    assert_contains(assembly, "_strlit_0 db 'a', 'b', 'c', 0");
+    assert_contains(assembly, "mov eax, _strlit_0");
+    assert_contains(assembly, "call print_string");
+    assert_contains(assembly, "call print_newline");
+    free(assembly);
+}
+
+void test_codegen_rejects_string_return_procedure_with_explicit_error(void) {
+    CompilerError error = {0};
+    char *assembly = generate_source_with_error(
+        "procedimento string saudacao()\n"
+        "inicio\n"
+        "  retorna \"oi\";\n"
+        "fim\n"
+        "programa demo\n"
+        "inicio\n"
+        "  escreval 1;\n"
         "fim",
         &error);
 
     TEST_ASSERT_NULL(assembly);
     TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
     TEST_ASSERT_EQUAL_STRING(
-        "Code generation for string literal write expressions is not supported yet.", error.message);
+        "Code generation for string procedure signatures is not supported yet.", error.message);
 }
 
 void test_codegen_local_string_and_scalar_have_non_overlapping_frame_offsets(void) {
@@ -988,9 +997,9 @@ int main(void) {
     RUN_TEST(test_codegen_zero_initializes_local_integer_vector_storage);
     RUN_TEST(test_codegen_emits_local_integer_vector_read_and_write);
     RUN_TEST(test_codegen_procedure_local_vector_and_para_temporaries_do_not_overlap);
-    RUN_TEST(test_codegen_rejects_string_indexed_read_in_main_with_explicit_error);
-    RUN_TEST(test_codegen_rejects_string_indexed_write_in_main_with_explicit_error);
-    RUN_TEST(test_codegen_rejects_string_indexed_read_in_procedure_with_explicit_error);
+    RUN_TEST(test_codegen_emits_byte_load_for_string_indexed_read_in_main);
+    RUN_TEST(test_codegen_emits_byte_store_for_string_indexed_write_in_main);
+    RUN_TEST(test_codegen_emits_local_string_indexed_read_in_procedure);
     RUN_TEST(test_codegen_copies_string_literal_into_fixed_buffer);
     RUN_TEST(test_codegen_emits_string_write_loop_for_escreval);
     RUN_TEST(test_codegen_local_string_frame_reserves_n_bytes_not_dwords);
@@ -998,7 +1007,8 @@ int main(void) {
     RUN_TEST(test_codegen_local_string_read_uses_frame_address);
     RUN_TEST(test_codegen_local_string_write_uses_frame_address);
     RUN_TEST(test_codegen_local_string_and_scalar_have_non_overlapping_frame_offsets);
-    RUN_TEST(test_codegen_rejects_string_literal_escreva_with_explicit_error);
-    RUN_TEST(test_codegen_rejects_string_literal_escreval_with_explicit_error);
+    RUN_TEST(test_codegen_emits_string_literal_escreva_via_literal_label);
+    RUN_TEST(test_codegen_emits_string_literal_escreval_via_literal_label);
+    RUN_TEST(test_codegen_rejects_string_return_procedure_with_explicit_error);
     return UNITY_END();
 }

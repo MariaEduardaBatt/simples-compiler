@@ -20,6 +20,17 @@ typedef struct {
 } SizeList;
 
 typedef struct {
+    const ASTExpression *expression;
+    size_t label_id;
+} StringLiteralLabel;
+
+typedef struct {
+    StringLiteralLabel *items;
+    size_t count;
+    size_t capacity;
+} StringLiteralList;
+
+typedef struct {
     StringBuilder *builder;
     const SizeList *for_loop_ids;
     const SizeList *procedure_for_loop_ids;
@@ -33,6 +44,7 @@ typedef struct {
     const ASTDeclaration *proc_locals;
     size_t proc_local_count;        /* number of local declarations (for iteration) */
     size_t proc_local_frame_bytes;  /* aligned byte count of local frame (used for for-loop temp offsets) */
+    const StringLiteralList *string_literals;
 } CodegenContext;
 
 static bool builder_reserve(StringBuilder *builder, size_t extra_length) {
@@ -114,6 +126,27 @@ static bool size_list_append(SizeList *list, size_t value) {
     }
 
     list->items[list->count++] = value;
+    return true;
+}
+
+static bool string_literal_list_append(StringLiteralList *list, const ASTExpression *expression, size_t label_id) {
+    StringLiteralLabel *items;
+    size_t new_capacity;
+
+    if (list->count == list->capacity) {
+        new_capacity = list->capacity == 0 ? 4 : list->capacity * 2;
+        items = realloc(list->items, new_capacity * sizeof(*items));
+        if (items == NULL) {
+            return false;
+        }
+
+        list->items = items;
+        list->capacity = new_capacity;
+    }
+
+    list->items[list->count].expression = expression;
+    list->items[list->count].label_id = label_id;
+    list->count++;
     return true;
 }
 
@@ -492,13 +525,13 @@ static bool fail_float_main_codegen(CompilerError *error, int line, int column) 
     return false;
 }
 
-static bool fail_string_index_codegen(CompilerError *error, int line, int column) {
+static bool fail_string_signature_codegen(CompilerError *error, int line, int column) {
     compiler_error_set(
         error,
         COMPILER_PHASE_CODEGEN,
         line,
         column,
-        "Code generation for string-indexed expressions is not supported yet.");
+        "Code generation for string procedure signatures is not supported yet.");
     return false;
 }
 
@@ -555,8 +588,6 @@ static bool resolve_procedure_for_loop_offsets(
 
 static bool procedure_expression_supports_integer_backend(const ASTExpression *expression, const ASTProcedure *proc, CompilerError *error) {
     size_t index;
-    size_t i;
-    ASTType base_type;
 
     if (expression == NULL) {
         return true;
@@ -582,17 +613,6 @@ static bool procedure_expression_supports_integer_backend(const ASTExpression *e
             return procedure_expression_supports_integer_backend(expression->binary.left, proc, error) &&
                    procedure_expression_supports_integer_backend(expression->binary.right, proc, error);
         case AST_EXPR_INDEX:
-            if (proc != NULL) {
-                for (i = 0; i < proc->local_declaration_count; i++) {
-                    if (strcmp(proc->local_declarations[i].name, expression->index_access.name) == 0) {
-                        base_type = proc->local_declarations[i].type;
-                        if (base_type == AST_TYPE_STRING) {
-                            return fail_string_index_codegen(error, expression->line, expression->column);
-                        }
-                        break;
-                    }
-                }
-            }
             return procedure_expression_supports_integer_backend(expression->index_access.index, proc, error);
         default:
             compiler_error_set(
@@ -729,10 +749,6 @@ static bool main_expression_supports_integer_backend(
             return main_expression_supports_integer_backend(expression->binary.left, program, semantic, error) &&
                    main_expression_supports_integer_backend(expression->binary.right, program, semantic, error);
         case AST_EXPR_INDEX:
-            if (find_global_declaration_type(program, expression->index_access.name, &type) &&
-                type == AST_TYPE_STRING) {
-                return fail_string_index_codegen(error, expression->line, expression->column);
-            }
             return main_expression_supports_integer_backend(expression->index_access.index, program, semantic, error);
         default:
             compiler_error_set(
@@ -758,12 +774,6 @@ static bool main_command_supports_integer_backend(
         case AST_COMMAND_ASSIGNMENT:
             if (find_global_declaration_type(program, command->assignment.target.type == AST_TARGET_IDENTIFIER ? command->assignment.target.identifier : command->assignment.target.indexed.name, &type) && type == AST_TYPE_FLUTUANTE) {
                 return fail_float_main_codegen(error, command->assignment.target.line, command->assignment.target.column);
-            }
-            if (command->assignment.target.type == AST_TARGET_INDEXED &&
-                find_global_declaration_type(program, command->assignment.target.indexed.name, &type) &&
-                type == AST_TYPE_STRING) {
-                return fail_string_index_codegen(
-                    error, command->assignment.target.line, command->assignment.target.column);
             }
             return main_expression_supports_integer_backend(command->assignment.expression, program, semantic, error);
         case AST_COMMAND_READ:
@@ -859,8 +869,6 @@ static bool main_program_supports_integer_backend(
 
 static bool procedure_command_supports_integer_backend(const ASTCommand *command, const ASTProcedure *proc, CompilerError *error) {
     size_t index;
-    size_t i;
-    ASTType base_type;
 
     if (command == NULL) {
         return true;
@@ -868,20 +876,6 @@ static bool procedure_command_supports_integer_backend(const ASTCommand *command
 
     switch (command->type) {
         case AST_COMMAND_ASSIGNMENT:
-            if (command->assignment.target.type == AST_TARGET_INDEXED && proc != NULL) {
-                for (i = 0; i < proc->local_declaration_count; i++) {
-                    if (strcmp(proc->local_declarations[i].name, command->assignment.target.indexed.name) == 0) {
-                        base_type = proc->local_declarations[i].type;
-                        if (base_type == AST_TYPE_STRING) {
-                            return fail_string_index_codegen(
-                                error,
-                                command->assignment.target.line,
-                                command->assignment.target.column);
-                        }
-                        break;
-                    }
-                }
-            }
             return procedure_expression_supports_integer_backend(command->assignment.expression, proc, error);
         case AST_COMMAND_READ:
             return true;
@@ -955,10 +949,16 @@ static bool procedure_supports_integer_backend(const ASTProcedure *procedure, Co
     if (procedure->return_type == AST_TYPE_FLUTUANTE) {
         return fail_float_procedure_codegen(error, procedure->line, procedure->column);
     }
+    if (procedure->return_type == AST_TYPE_STRING) {
+        return fail_string_signature_codegen(error, procedure->line, procedure->column);
+    }
 
     for (index = 0; index < procedure->parameter_count; ++index) {
         if (procedure->parameters[index].type == AST_TYPE_FLUTUANTE) {
             return fail_float_procedure_codegen(error, procedure->parameters[index].line, procedure->parameters[index].column);
+        }
+        if (procedure->parameters[index].type == AST_TYPE_STRING) {
+            return fail_string_signature_codegen(error, procedure->parameters[index].line, procedure->parameters[index].column);
         }
     }
 
@@ -978,6 +978,171 @@ static bool procedure_supports_integer_backend(const ASTProcedure *procedure, Co
     }
 
     return true;
+}
+
+static bool collect_string_literals_in_expression(StringLiteralList *list, size_t *next_label_id, const ASTExpression *expression) {
+    size_t index;
+
+    if (expression == NULL) {
+        return true;
+    }
+
+    switch (expression->type) {
+        case AST_EXPR_STRING:
+            return string_literal_list_append(list, expression, (*next_label_id)++);
+        case AST_EXPR_INDEX:
+            return collect_string_literals_in_expression(list, next_label_id, expression->index_access.index);
+        case AST_EXPR_CALL:
+            for (index = 0; index < expression->call.argument_count; ++index) {
+                if (!collect_string_literals_in_expression(list, next_label_id, expression->call.arguments[index])) {
+                    return false;
+                }
+            }
+            return true;
+        case AST_EXPR_UNARY:
+            return collect_string_literals_in_expression(list, next_label_id, expression->unary.operand);
+        case AST_EXPR_BINARY:
+            return collect_string_literals_in_expression(list, next_label_id, expression->binary.left) &&
+                   collect_string_literals_in_expression(list, next_label_id, expression->binary.right);
+        default:
+            return true;
+    }
+}
+
+static bool collect_string_literals_in_commands(
+    StringLiteralList *list, size_t *next_label_id, const ASTCommand *commands, size_t command_count) {
+    size_t index;
+
+    for (index = 0; index < command_count; ++index) {
+        const ASTCommand *command = &commands[index];
+        switch (command->type) {
+            case AST_COMMAND_ASSIGNMENT:
+                if (!collect_string_literals_in_expression(list, next_label_id, command->assignment.expression)) {
+                    return false;
+                }
+                if (command->assignment.target.type == AST_TARGET_INDEXED &&
+                    !collect_string_literals_in_expression(list, next_label_id, command->assignment.target.indexed.index)) {
+                    return false;
+                }
+                break;
+            case AST_COMMAND_WRITE:
+            case AST_COMMAND_WRITELN:
+                if (!collect_string_literals_in_expression(list, next_label_id, command->write.expression)) {
+                    return false;
+                }
+                break;
+            case AST_COMMAND_CALL:
+                if (!collect_string_literals_in_expression(list, next_label_id, (const ASTExpression *)&(ASTExpression){
+                        .type = AST_EXPR_CALL, .call = command->call_command.call})) {
+                    return false;
+                }
+                break;
+            case AST_COMMAND_RETURN:
+                if (!collect_string_literals_in_expression(list, next_label_id, command->return_command.expression)) {
+                    return false;
+                }
+                break;
+            case AST_COMMAND_IF:
+                if (!collect_string_literals_in_expression(list, next_label_id, command->if_command.condition) ||
+                    !collect_string_literals_in_commands(list, next_label_id, command->if_command.then_commands, command->if_command.then_count) ||
+                    !collect_string_literals_in_commands(list, next_label_id, command->if_command.else_commands, command->if_command.else_count)) {
+                    return false;
+                }
+                break;
+            case AST_COMMAND_WHILE:
+                if (!collect_string_literals_in_expression(list, next_label_id, command->while_command.condition) ||
+                    !collect_string_literals_in_commands(list, next_label_id, command->while_command.body_commands, command->while_command.body_count)) {
+                    return false;
+                }
+                break;
+            case AST_COMMAND_FOR:
+                if (!collect_string_literals_in_expression(list, next_label_id, command->for_command.start_expression) ||
+                    !collect_string_literals_in_expression(list, next_label_id, command->for_command.end_expression) ||
+                    !collect_string_literals_in_expression(list, next_label_id, command->for_command.step_expression) ||
+                    !collect_string_literals_in_commands(list, next_label_id, command->for_command.body_commands, command->for_command.body_count)) {
+                    return false;
+                }
+                break;
+            case AST_COMMAND_READ:
+                break;
+        }
+    }
+
+    return true;
+}
+
+static bool collect_string_literals_in_program(StringLiteralList *list, const ASTProgram *program) {
+    size_t index;
+    size_t next_label_id = 0;
+
+    if (!collect_string_literals_in_commands(list, &next_label_id, program->commands, program->command_count)) {
+        return false;
+    }
+
+    for (index = 0; index < program->procedure_count; ++index) {
+        if (!collect_string_literals_in_commands(
+                list, &next_label_id, program->procedures[index].commands, program->procedures[index].command_count)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool builder_append_string_literal_bytes(StringBuilder *builder, const char *literal) {
+    size_t index;
+
+    for (index = 0; literal[index] != '\0'; ++index) {
+        unsigned char ch = (unsigned char)literal[index];
+        if (index > 0 && !builder_append(builder, ", ")) {
+            return false;
+        }
+        if (ch == '\'' || ch == '\\' || ch < 32 || ch > 126) {
+            if (!builder_appendf(builder, "%u", (unsigned int)ch)) {
+                return false;
+            }
+        } else if (!builder_appendf(builder, "'%c'", (char)ch)) {
+            return false;
+        }
+    }
+
+    if (literal[0] != '\0' && !builder_append(builder, ", ")) {
+        return false;
+    }
+
+    return builder_append(builder, "0");
+}
+
+static bool emit_string_literal_declarations(StringBuilder *builder, const StringLiteralList *list) {
+    size_t index;
+
+    for (index = 0; index < list->count; ++index) {
+        if (!builder_appendf(builder, "_strlit_%zu db ", list->items[index].label_id) ||
+            !builder_append_string_literal_bytes(builder, list->items[index].expression->string_value) ||
+            !builder_append(builder, "\n")) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool generate_string_literal_address(CodegenContext *context, const ASTExpression *expression, CompilerError *error) {
+    size_t index;
+
+    if (context->string_literals != NULL) {
+        for (index = 0; index < context->string_literals->count; ++index) {
+            if (context->string_literals->items[index].expression == expression) {
+                return builder_appendf(context->builder, "    mov eax, _strlit_%zu\n", context->string_literals->items[index].label_id);
+            }
+        }
+    }
+
+    return fail_codegen_internal(
+        error,
+        expression != NULL ? expression->line : 0,
+        expression != NULL ? expression->column : 0,
+        "Internal error: missing string literal label mapping.");
 }
 
 static bool generate_string_literal_copy(
@@ -1114,13 +1279,7 @@ static bool generate_expression(CodegenContext *context, const ASTExpression *ex
         case AST_EXPR_INT:
             return builder_appendf(builder, "    mov eax, %d\n", expression->int_value);
         case AST_EXPR_STRING:
-            compiler_error_set(
-                error,
-                COMPILER_PHASE_CODEGEN,
-                expression->line,
-                expression->column,
-                "Code generation for string literal write expressions is not supported yet.");
-            return false;
+            return generate_string_literal_address(context, expression, error);
         case AST_EXPR_FLOAT:
             return fail_float_expression_codegen(error, expression->line, expression->column);
         case AST_EXPR_IDENTIFIER:
@@ -1204,21 +1363,25 @@ static bool generate_expression(CodegenContext *context, const ASTExpression *ex
             size_t base_offset;
             ASTType indexed_base_type;
 
-            /* Safety net: reject string-indexed reads even if support check missed it. */
-            if (context->proc_locals != NULL) {
-                size_t si;
-                for (si = 0; si < context->proc_local_count; si++) {
-                    if (strcmp(context->proc_locals[si].name, access->name) == 0) {
-                        indexed_base_type = context->proc_locals[si].type;
-                        if (indexed_base_type == AST_TYPE_STRING) {
-                            return fail_string_index_codegen(error, expression->line, expression->column);
-                        }
-                        break;
+            indexed_base_type = find_context_variable_type(
+                context->proc_locals, context->proc_local_count, context->program, access->name);
+
+            if (indexed_base_type == AST_TYPE_STRING) {
+                if (context->proc_locals != NULL) {
+                    base_offset = local_declaration_base_offset_by_name(
+                        context->proc_locals, context->proc_local_count, access->name);
+                    if (base_offset > 0) {
+                        return generate_expression(context, access->index, error) &&
+                               builder_appendf(builder, "    lea edx, [ebp + eax - %zu]\n", base_offset) &&
+                               builder_append(builder, "    movzx eax, byte [edx]\n");
                     }
                 }
-            } else if (find_global_declaration_type(context->program, access->name, &indexed_base_type) &&
-                       indexed_base_type == AST_TYPE_STRING) {
-                return fail_string_index_codegen(error, expression->line, expression->column);
+
+                return generate_expression(context, access->index, error) &&
+                       builder_append(builder, "    lea edx, [") &&
+                       builder_append_user_symbol_name(builder, context->for_loop_ids, access->name) &&
+                       builder_append(builder, " + eax]\n") &&
+                       builder_append(builder, "    movzx eax, byte [edx]\n");
             }
 
             /* Local vector: elements stored descending from ebp (nums[0]=ebp-N, nums[1]=ebp-N-4...) */
@@ -1260,28 +1423,8 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
                 size_t base_offset;
                 ASTType indexed_base_type;
 
-                /* Safety net: reject string-indexed writes even if support check missed it. */
-                if (context->proc_locals != NULL) {
-                    size_t si;
-                    for (si = 0; si < context->proc_local_count; si++) {
-                        if (strcmp(context->proc_locals[si].name, access->name) == 0) {
-                            indexed_base_type = context->proc_locals[si].type;
-                            if (indexed_base_type == AST_TYPE_STRING) {
-                                return fail_string_index_codegen(
-                                    error,
-                                    command->assignment.target.line,
-                                    command->assignment.target.column);
-                            }
-                            break;
-                        }
-                    }
-                } else if (find_global_declaration_type(context->program, access->name, &indexed_base_type) &&
-                           indexed_base_type == AST_TYPE_STRING) {
-                    return fail_string_index_codegen(
-                        error,
-                        command->assignment.target.line,
-                        command->assignment.target.column);
-                }
+                indexed_base_type = find_context_variable_type(
+                    context->proc_locals, context->proc_local_count, context->program, access->name);
 
                 /* Evaluate value first so address in edx is not clobbered by the expression. */
                 if (!generate_expression(context, command->assignment.expression, error)) {
@@ -1289,6 +1432,28 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
                 }
                 if (!builder_append(builder, "    push eax\n")) {
                     return false;
+                }
+
+                if (indexed_base_type == AST_TYPE_STRING) {
+                    if (context->proc_locals != NULL) {
+                        base_offset = local_declaration_base_offset_by_name(
+                            context->proc_locals, context->proc_local_count, access->name);
+                        if (base_offset > 0) {
+                            if (!generate_expression(context, access->index, error) ||
+                                !builder_appendf(builder, "    lea edx, [ebp + eax - %zu]\n", base_offset)) {
+                                return false;
+                            }
+                            return builder_append(builder, "    pop eax\n") &&
+                                   builder_append(builder, "    mov byte [edx], al\n");
+                        }
+                    }
+
+                    return generate_expression(context, access->index, error) &&
+                           builder_append(builder, "    lea edx, [") &&
+                           builder_append_user_symbol_name(builder, context->for_loop_ids, access->name) &&
+                           builder_append(builder, " + eax]\n") &&
+                           builder_append(builder, "    pop eax\n") &&
+                           builder_append(builder, "    mov byte [edx], al\n");
                 }
 
                 if (context->proc_locals != NULL) {
@@ -1352,6 +1517,11 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
         case AST_COMMAND_WRITE: {
             const ASTExpression *wexpr = command->write.expression;
 
+            if (wexpr != NULL && wexpr->type == AST_EXPR_STRING) {
+                return generate_string_literal_address(context, wexpr, error) &&
+                       builder_append(builder, "    call print_string\n");
+            }
+
             if (wexpr != NULL && wexpr->type == AST_EXPR_IDENTIFIER &&
                 find_context_variable_type(
                     context->proc_locals, context->proc_local_count, context->program, wexpr->identifier) ==
@@ -1365,6 +1535,12 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
         }
         case AST_COMMAND_WRITELN: {
             const ASTExpression *wexpr = command->write.expression;
+
+            if (wexpr != NULL && wexpr->type == AST_EXPR_STRING) {
+                return generate_string_literal_address(context, wexpr, error) &&
+                       builder_append(builder, "    call print_string\n") &&
+                       builder_append(builder, "    call print_newline\n");
+            }
 
             if (wexpr != NULL && wexpr->type == AST_EXPR_IDENTIFIER &&
                 find_context_variable_type(
@@ -1777,6 +1953,7 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
     StringBuilder builder = {0};
     SizeList for_loop_ids = {0};
     SizeList main_for_loop_ids = {0};
+    StringLiteralList string_literals = {0};
     CodegenContext context;
     const SymbolInfo *globals;
     size_t global_count;
@@ -1818,6 +1995,12 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
         return fail_codegen_internal(error, 0, 0, "Internal error: code generation failed.");
     }
 
+    if (!collect_string_literals_in_program(&string_literals, program)) {
+        free(main_for_loop_ids.items);
+        free(for_loop_ids.items);
+        return fail_codegen_internal(error, 0, 0, "Internal error: code generation failed.");
+    }
+
     if (!builder_append(&builder, "global _start\n\nsection .data\n")) {
         goto fail;
     }
@@ -1853,6 +2036,10 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
         }
     }
 
+    if (!emit_string_literal_declarations(&builder, &string_literals)) {
+        goto fail;
+    }
+
     if (!builder_append(&builder, "newline db 10\nprint_buffer times 12 db 0\nread_buffer times 16 db 0\n\nsection .text\n_start:\n")) {
         goto fail;
     }
@@ -1869,6 +2056,7 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
     context.proc_locals = NULL;
     context.proc_local_count = 0;
     context.proc_local_frame_bytes = 0;
+    context.string_literals = &string_literals;
 
     if (!generate_command_block(&context, program->commands, program->command_count, error)) {
         goto fail;
@@ -1890,6 +2078,7 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
 
     free(main_for_loop_ids.items);
     free(for_loop_ids.items);
+    free(string_literals.items);
     if (out_assembly != NULL) {
         *out_assembly = builder.data;
     } else {
@@ -1898,6 +2087,7 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
     return true;
 
 fail:
+    free(string_literals.items);
     free(main_for_loop_ids.items);
     free(for_loop_ids.items);
     free(builder.data);
