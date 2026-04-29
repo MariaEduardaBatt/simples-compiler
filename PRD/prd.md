@@ -47,7 +47,7 @@ ld -m elf_i386 programa.o -o programa
 
 ## A Linguagem SIMPLES — Gramática e Tokens
 
-### Tokens reconhecidos (47 tokens)
+### Tokens reconhecidos (49 tokens)
 
 **Palavras-chave:**
 
@@ -58,6 +58,7 @@ ld -m elf_i386 programa.o -o programa
 | `TOK_FIM` | `fim` | Palavra-chave |
 | `TOK_INTEIRO` | `inteiro` | Tipo |
 | `TOK_FLUTUANTE` | `flutuante` | Tipo |
+| `TOK_STRING` | `string` | Tipo |
 | `TOK_VAZIO` | `vazio` | Tipo |
 | `TOK_SE` | `se` | Controle |
 | `TOK_ENTAO` | `entao` | Controle |
@@ -88,6 +89,7 @@ ld -m elf_i386 programa.o -o programa
 | `TOK_ID` | `[A-Za-z_][A-Za-z_0-9]*` | `x`, `soma`, `_val` |
 | `TOK_NUM_INT` | `[0-9]+` | `42`, `0`, `100` |
 | `TOK_NUM_FLOAT` | `[0-9]+\.[0-9]+` | `3.14`, `0.5` |
+| `TOK_STRING_LITERAL` | `"..."` | `"ana"`, `"oi"` |
 
 **Operadores:**
 
@@ -110,6 +112,8 @@ ld -m elf_i386 programa.o -o programa
 | --- | --- | --- |
 | `TOK_ABRE_PAR` | `(` | Agrupamento |
 | `TOK_FECHA_PAR` | `)` | Agrupamento |
+| `TOK_ABRE_COL` | `[` | Indexação |
+| `TOK_FECHA_COL` | `]` | Indexação |
 | `TOK_VIRGULA` | `,` | `inteiro a, b, c` |
 | `TOK_PONTO_VIRGULA` | `;` | Separador |
 | `TOK_EOF` | fim de arquivo | Especial |
@@ -132,8 +136,9 @@ ld -m elf_i386 programa.o -o programa
 
 <declaracoes_globais> ::= { <declaracao> }
 <declaracoes_locais>  ::= { <declaracao> }
-<declaracao>      ::= <tipo> ID { "," ID } ";"
-<tipo>            ::= "inteiro" | "flutuante"
+<declaracao>      ::= <tipo> <item_declaracao> { "," <item_declaracao> } ";"
+<item_declaracao> ::= ID [ "[" NUM_INT "]" ]
+<tipo>            ::= "inteiro" | "flutuante" | "string"
 
 <comandos>        ::= { <comando> }
 <comando>         ::= <atribuicao>
@@ -145,7 +150,8 @@ ld -m elf_i386 programa.o -o programa
                     | <cmd_chamada>
                     | <cmd_retorna>
 
-<atribuicao>      ::= ID "<-" <expressao> ";"
+<atribuivel>      ::= ID | ID "[" <expressao> "]"
+<atribuicao>      ::= <atribuivel> "<-" <expressao> ";"
 <cmd_leia>        ::= "leia" ID ";"
 <cmd_escreva>     ::= ("escreva" | "escreval") <expressao> ";"
 <cmd_chamada>     ::= ID "(" [ <argumentos> ] ")" ";"
@@ -166,7 +172,11 @@ ld -m elf_i386 programa.o -o programa
 <op_relacional>   ::= ">" | "<" | "=" | "<>" | ">=" | "<="
 <expr_aditiva>    ::= <expr_mult> { ("+" | "-") <expr_mult> }
 <expr_mult>       ::= <fator> { ("*" | "div") <fator> }
-<fator>           ::= ID | NUM_INT | NUM_FLOAT
+<fator>           ::= ID
+                    | ID "[" <expressao> "]"
+                    | NUM_INT
+                    | NUM_FLOAT
+                    | STRING_LITERAL
                     | ID "(" [ <argumentos> ] ")"
                     | "(" <expressao> ")"
                     | "nao" <fator>
@@ -846,7 +856,8 @@ Todas invocadas via `int 0x80`.
 ## Out of Scope (v1.0)
 
 - Geração de código para procedimentos `flutuante` (sintaxe e semântica aceitas; backend rejeita explicitamente)
-- Vetores e strings
+- Assinaturas de procedimento com `string` (parâmetros e retorno)
+- Matrizes 2D
 - Otimizações de código (constant folding, dead code elimination)
 - Suporte a Windows (PE/COFF)
 - Recuperação de erros (modo pânico) — o compilador para no primeiro erro

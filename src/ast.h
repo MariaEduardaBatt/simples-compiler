@@ -7,17 +7,30 @@
 typedef enum {
     AST_TYPE_INTEIRO,
     AST_TYPE_FLUTUANTE,
+    AST_TYPE_STRING,
     AST_TYPE_VAZIO
 } ASTType;
 
 typedef enum {
     AST_EXPR_INT,
     AST_EXPR_FLOAT,
+    AST_EXPR_STRING,
     AST_EXPR_IDENTIFIER,
+    AST_EXPR_INDEX,
     AST_EXPR_CALL,
     AST_EXPR_UNARY,
     AST_EXPR_BINARY
 } ASTExpressionType;
+
+typedef enum {
+    AST_STORAGE_SCALAR,
+    AST_STORAGE_INDEXED
+} ASTStorageKind;
+
+typedef enum {
+    AST_TARGET_IDENTIFIER,
+    AST_TARGET_INDEXED
+} ASTAssignmentTargetType;
 
 typedef enum {
     AST_UNARY_NEGATE,
@@ -45,6 +58,8 @@ typedef struct ASTCommand ASTCommand;
 typedef struct {
     char *name;
     ASTType type;
+    ASTStorageKind storage;
+    size_t capacity;
     int line;
     int column;
 } ASTDeclaration;
@@ -52,6 +67,8 @@ typedef struct {
 typedef struct {
     char *name;
     ASTType type;
+    ASTStorageKind storage;
+    size_t capacity;
     int line;
     int column;
 } ASTParameter;
@@ -64,6 +81,13 @@ typedef struct {
     size_t argument_count;
 } ASTCall;
 
+typedef struct {
+    char *name;
+    ASTExpression *index;
+    int line;
+    int column;
+} ASTIndexedAccess;
+
 struct ASTExpression {
     ASTExpressionType type;
     int line;
@@ -71,7 +95,9 @@ struct ASTExpression {
     union {
         int int_value;
         double float_value;
+        char *string_value;
         char *identifier;
+        ASTIndexedAccess index_access;
         ASTCall call;
         struct {
             ASTUnaryOp op;
@@ -104,9 +130,17 @@ typedef enum {
 } ASTCommandType;
 
 typedef struct {
-    char *name;
+    ASTAssignmentTargetType type;
     int line;
     int column;
+    union {
+        char *identifier;
+        ASTIndexedAccess indexed;
+    };
+} ASTAssignmentTarget;
+
+typedef struct {
+    ASTAssignmentTarget target;
     ASTExpression *expression;
 } ASTAssignmentCommand;
 

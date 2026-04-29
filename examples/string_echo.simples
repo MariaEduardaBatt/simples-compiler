@@ -1,0 +1,6 @@
+programa demo
+string nome[16];
+inicio
+  leia nome;
+  escreval nome;
+fim

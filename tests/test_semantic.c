@@ -39,7 +39,7 @@ void test_semantic_rejects_duplicate_declarations(void) {
     TEST_ASSERT_EQUAL_STRING("Identificador 'x' ja declarado.", error.message);
     TEST_ASSERT_EQUAL_INT(3, error.line);
     TEST_ASSERT_EQUAL_INT(9, error.column);
-    TEST_ASSERT_EQUAL_size_t(0, info.globals.count);
+    TEST_ASSERT_EQUAL_size_t(0, info.global_count);
 
     semantic_info_free(&info);
     ast_program_free(program);
@@ -63,7 +63,7 @@ void test_semantic_rejects_undeclared_variable_in_write_expression(void) {
     TEST_ASSERT_EQUAL_STRING("Identificador 'y' nao declarado.", error.message);
     TEST_ASSERT_EQUAL_INT(4, error.line);
     TEST_ASSERT_EQUAL_INT(11, error.column);
-    TEST_ASSERT_EQUAL_size_t(0, info.globals.count);
+    TEST_ASSERT_EQUAL_size_t(0, info.global_count);
 
     semantic_info_free(&info);
     ast_program_free(program);
@@ -87,7 +87,7 @@ void test_semantic_rejects_undeclared_assignment_target(void) {
     TEST_ASSERT_EQUAL_STRING("Identificador 'y' nao declarado.", error.message);
     TEST_ASSERT_EQUAL_INT(4, error.line);
     TEST_ASSERT_EQUAL_INT(3, error.column);
-    TEST_ASSERT_EQUAL_size_t(0, info.globals.count);
+    TEST_ASSERT_EQUAL_size_t(0, info.global_count);
 
     semantic_info_free(&info);
     ast_program_free(program);
@@ -111,7 +111,7 @@ void test_semantic_rejects_undeclared_identifier_in_assignment_expression(void) 
     TEST_ASSERT_EQUAL_STRING("Identificador 'y' nao declarado.", error.message);
     TEST_ASSERT_EQUAL_INT(4, error.line);
     TEST_ASSERT_EQUAL_INT(8, error.column);
-    TEST_ASSERT_EQUAL_size_t(0, info.globals.count);
+    TEST_ASSERT_EQUAL_size_t(0, info.global_count);
 
     semantic_info_free(&info);
     ast_program_free(program);
@@ -132,8 +132,8 @@ void test_semantic_accepts_unary_integer_and_identifier_expressions(void) {
     CompilerError error = {0};
 
     TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
-    TEST_ASSERT_EQUAL_size_t(1, info.globals.count);
-    TEST_ASSERT_EQUAL_STRING("x", info.globals.names[0]);
+    TEST_ASSERT_EQUAL_size_t(1, info.global_count);
+    TEST_ASSERT_EQUAL_STRING("x", info.globals[0].name);
 
     semantic_info_free(&info);
     ast_program_free(program);
@@ -157,7 +157,7 @@ void test_semantic_rejects_undeclared_identifier_inside_unary_expression(void) {
     TEST_ASSERT_EQUAL_STRING("Identificador 'y' nao declarado.", error.message);
     TEST_ASSERT_EQUAL_INT(4, error.line);
     TEST_ASSERT_EQUAL_INT(9, error.column);
-    TEST_ASSERT_EQUAL_size_t(0, info.globals.count);
+    TEST_ASSERT_EQUAL_size_t(0, info.global_count);
 
     semantic_info_free(&info);
     ast_program_free(program);
@@ -172,9 +172,9 @@ void test_semantic_accepts_declared_variables_and_collects_symbols(void) {
     CompilerError error = {0};
 
     TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
-    TEST_ASSERT_EQUAL_size_t(2, info.globals.count);
-    TEST_ASSERT_EQUAL_STRING("x", info.globals.names[0]);
-    TEST_ASSERT_EQUAL_STRING("y", info.globals.names[1]);
+    TEST_ASSERT_EQUAL_size_t(2, info.global_count);
+    TEST_ASSERT_EQUAL_STRING("x", info.globals[0].name);
+    TEST_ASSERT_EQUAL_STRING("y", info.globals[1].name);
 
     semantic_info_free(&info);
     ast_program_free(program);
@@ -291,9 +291,9 @@ void test_semantic_accepts_for_codegen_like_identifier_names(void) {
     CompilerError error = {0};
 
     TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
-    TEST_ASSERT_EQUAL_size_t(2, info.globals.count);
-    TEST_ASSERT_EQUAL_STRING("_for_end_0", info.globals.names[0]);
-    TEST_ASSERT_EQUAL_STRING("_for_step_0", info.globals.names[1]);
+    TEST_ASSERT_EQUAL_size_t(2, info.global_count);
+    TEST_ASSERT_EQUAL_STRING("_for_end_0", info.globals[0].name);
+    TEST_ASSERT_EQUAL_STRING("_for_step_0", info.globals[1].name);
 
     semantic_info_free(&info);
     ast_program_free(program);
@@ -324,8 +324,8 @@ void test_semantic_accepts_declared_read_target(void) {
     CompilerError error = {0};
 
     TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
-    TEST_ASSERT_EQUAL_size_t(1, info.globals.count);
-    TEST_ASSERT_EQUAL_STRING("x", info.globals.names[0]);
+    TEST_ASSERT_EQUAL_size_t(1, info.global_count);
+    TEST_ASSERT_EQUAL_STRING("x", info.globals[0].name);
 
     semantic_info_free(&info);
     ast_program_free(program);
@@ -511,12 +511,297 @@ void test_semantic_accepts_program_and_collects_procedure_signatures(void) {
     CompilerError error = {0};
 
     TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
-    TEST_ASSERT_EQUAL_size_t(1, info.globals.count);
+    TEST_ASSERT_EQUAL_size_t(1, info.global_count);
     TEST_ASSERT_EQUAL_size_t(1, info.procedure_count);
     TEST_ASSERT_EQUAL_STRING("identidade", info.procedures[0].name);
     TEST_ASSERT_EQUAL(AST_TYPE_FLUTUANTE, info.procedures[0].return_type);
     TEST_ASSERT_EQUAL_size_t(1, info.procedures[0].parameter_count);
     TEST_ASSERT_EQUAL(AST_TYPE_FLUTUANTE, info.procedures[0].parameter_types[0]);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+
+void test_semantic_rejects_string_without_capacity(void) {
+    const char *source =
+        "programa demo\n"
+        "string nome;\n"
+        "inicio\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL_STRING("Declaracao de string requer capacidade fixa.", error.message);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_rejects_string_literal_that_exceeds_capacity(void) {
+    const char *source =
+        "programa demo\n"
+        "string nome[4];\n"
+        "inicio\n"
+        "  nome <- \"abcd\";\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL_STRING("Literal de string com 4 bytes excede capacidade 4 de 'nome'.", error.message);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_rejects_scalar_identifier_indexing(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro x;\n"
+        "inicio\n"
+        "  escreval x[0];\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL_STRING("Identificador 'x' nao pode ser indexado.", error.message);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_rejects_scalar_identifier_indexing_in_assignment_target(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro x;\n"
+        "inicio\n"
+        "  x[0] <- 1;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL_STRING("Identificador 'x' nao pode ser indexado.", error.message);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_rejects_vector_in_write_expression(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro nums[3];\n"
+        "inicio\n"
+        "  escreval nums;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_SEMANTIC, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Identificador 'nums' nao pode ser usado como escalar.", error.message);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_rejects_vector_as_leia_target(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro nums[3];\n"
+        "inicio\n"
+        "  leia nums;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_SEMANTIC, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Identificador 'nums' nao pode ser alvo de 'leia'.", error.message);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_rejects_vector_as_plain_assignment_target(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro nums[3];\n"
+        "inicio\n"
+        "  nums <- 5;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_SEMANTIC, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Identificador 'nums' nao pode ser usado como escalar.", error.message);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_accepts_string_plain_assignment(void) {
+    const char *source =
+        "programa demo\n"
+        "string nome[20];\n"
+        "inicio\n"
+        "  nome <- \"abc\";\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_accepts_string_leia_target(void) {
+    const char *source =
+        "programa demo\n"
+        "string nome[20];\n"
+        "inicio\n"
+        "  leia nome;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_accepts_string_in_write_expression(void) {
+    const char *source =
+        "programa demo\n"
+        "string nome[20];\n"
+        "inicio\n"
+        "  nome <- \"oi\";\n"
+        "  escreval nome;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_rejects_string_to_string_variable_assignment(void) {
+    const char *source =
+        "programa demo\n"
+        "string nome[20];\n"
+        "string outro[20];\n"
+        "inicio\n"
+        "  nome <- outro;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_SEMANTIC, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Atribuicao de string para string nao suportada.", error.message);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_accepts_string_element_integer_assignment(void) {
+    const char *source =
+        "programa demo\n"
+        "string nome[20];\n"
+        "inicio\n"
+        "  nome[0] <- 65;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_accepts_integer_read_from_string_element(void) {
+    const char *source =
+        "programa demo\n"
+        "string nome[20];\n"
+        "inteiro x;\n"
+        "inicio\n"
+        "  nome <- \"abc\";\n"
+        "  x <- nome[0];\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_rejects_indexed_procedure_parameter(void) {
+    const char *source =
+        "procedimento vazio p(inteiro nums[2])\n"
+        "inicio\n"
+        "fim\n"
+        "programa demo\n"
+        "inicio\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_SEMANTIC, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Parametro 'nums' nao pode ser vetor.", error.message);
 
     semantic_info_free(&info);
     ast_program_free(program);
@@ -548,5 +833,19 @@ int main(void) {
     RUN_TEST(test_semantic_rejects_void_procedure_returning_expression);
     RUN_TEST(test_semantic_rejects_non_void_procedure_without_return_on_all_paths);
     RUN_TEST(test_semantic_accepts_program_and_collects_procedure_signatures);
+    RUN_TEST(test_semantic_rejects_string_without_capacity);
+    RUN_TEST(test_semantic_rejects_string_literal_that_exceeds_capacity);
+    RUN_TEST(test_semantic_rejects_scalar_identifier_indexing);
+    RUN_TEST(test_semantic_rejects_scalar_identifier_indexing_in_assignment_target);
+    RUN_TEST(test_semantic_rejects_vector_in_write_expression);
+    RUN_TEST(test_semantic_rejects_vector_as_leia_target);
+    RUN_TEST(test_semantic_rejects_vector_as_plain_assignment_target);
+    RUN_TEST(test_semantic_accepts_string_plain_assignment);
+    RUN_TEST(test_semantic_accepts_string_leia_target);
+    RUN_TEST(test_semantic_accepts_string_in_write_expression);
+    RUN_TEST(test_semantic_rejects_string_to_string_variable_assignment);
+    RUN_TEST(test_semantic_accepts_string_element_integer_assignment);
+    RUN_TEST(test_semantic_accepts_integer_read_from_string_element);
+    RUN_TEST(test_semantic_rejects_indexed_procedure_parameter);
     return UNITY_END();
 }

@@ -144,6 +144,11 @@ nasm -f elf32 "$e2e_dir/for.asm" -o "$e2e_dir/for.o"
 ld -m elf_i386 "$e2e_dir/for.o" -o "$e2e_dir/for"
 [ "$("$e2e_dir/for")" = "15" ]
 
+"$compiler" examples/vector_sum.simples "$e2e_dir/vector_sum.asm"
+nasm -f elf32 "$e2e_dir/vector_sum.asm" -o "$e2e_dir/vector_sum.o"
+ld -m elf_i386 "$e2e_dir/vector_sum.o" -o "$e2e_dir/vector_sum"
+[ "$("$e2e_dir/vector_sum")" = "10" ]
+
 cat >"$e2e_dir/for_negative_step.simples" <<'EOF'
 programa demo
 inteiro i;
@@ -177,6 +182,38 @@ nasm -f elf32 "$e2e_dir/read.asm" -o "$e2e_dir/read.o"
 ld -m elf_i386 "$e2e_dir/read.o" -o "$e2e_dir/read"
 output=$(printf '42\n' | "$e2e_dir/read")
 [ "$output" = "42" ]
+
+"$compiler" examples/string_echo.simples "$e2e_dir/string_echo.asm"
+nasm -f elf32 "$e2e_dir/string_echo.asm" -o "$e2e_dir/string_echo.o"
+ld -m elf_i386 "$e2e_dir/string_echo.o" -o "$e2e_dir/string_echo"
+output=$(printf 'ana\n' | "$e2e_dir/string_echo")
+[ "$output" = "ana" ]
+
+cat >"$e2e_dir/string_index.simples" <<'EOF'
+programa demo
+string nome[8];
+inicio
+  nome[0] <- 65;
+  nome[1] <- 66;
+  nome[2] <- 0;
+  escreval nome;
+fim
+EOF
+"$compiler" "$e2e_dir/string_index.simples" "$e2e_dir/string_index.asm"
+nasm -f elf32 "$e2e_dir/string_index.asm" -o "$e2e_dir/string_index.o"
+ld -m elf_i386 "$e2e_dir/string_index.o" -o "$e2e_dir/string_index"
+[ "$("$e2e_dir/string_index")" = "AB" ]
+
+cat >"$e2e_dir/string_literal_write.simples" <<'EOF'
+programa demo
+inicio
+  escreval "abc";
+fim
+EOF
+"$compiler" "$e2e_dir/string_literal_write.simples" "$e2e_dir/string_literal_write.asm"
+nasm -f elf32 "$e2e_dir/string_literal_write.asm" -o "$e2e_dir/string_literal_write.o"
+ld -m elf_i386 "$e2e_dir/string_literal_write.o" -o "$e2e_dir/string_literal_write"
+[ "$("$e2e_dir/string_literal_write")" = "abc" ]
 
 output=$(printf '%s\n' '-17' | "$e2e_dir/read")
 [ "$output" = "-17" ]

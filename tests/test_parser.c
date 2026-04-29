@@ -73,7 +73,8 @@ void test_parser_builds_assignment_ast_with_expected_counts_and_shape(void) {
     TEST_ASSERT_EQUAL_size_t(1, program->command_count);
     TEST_ASSERT_EQUAL_STRING("x", program->declarations[0].name);
     TEST_ASSERT_EQUAL(AST_COMMAND_ASSIGNMENT, program->commands[0].type);
-    TEST_ASSERT_EQUAL_STRING("x", program->commands[0].assignment.name);
+    TEST_ASSERT_EQUAL(AST_TARGET_IDENTIFIER, program->commands[0].assignment.target.type);
+    TEST_ASSERT_EQUAL_STRING("x", program->commands[0].assignment.target.identifier);
     TEST_ASSERT_EQUAL(AST_EXPR_BINARY, program->commands[0].assignment.expression->type);
 
     ast_program_free(program);
@@ -460,6 +461,63 @@ void test_ast_procedure_free_releases_owned_members_and_resets_fields(void) {
     TEST_ASSERT_EQUAL_size_t(0, procedure.command_count);
 }
 
+void test_parser_parses_indexed_declarations_and_indexed_assignment(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro nums[10];\n"
+        "inicio\n"
+        "  nums[1] <- 42;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+
+    TEST_ASSERT_EQUAL(AST_STORAGE_INDEXED, program->declarations[0].storage);
+    TEST_ASSERT_EQUAL_size_t(10, program->declarations[0].capacity);
+    TEST_ASSERT_EQUAL(AST_TARGET_INDEXED, program->commands[0].assignment.target.type);
+
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_parser_parses_string_literal_expression(void) {
+    const char *source =
+        "programa demo\n"
+        "string nome[8];\n"
+        "inicio\n"
+        "  nome <- \"ana\";\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+
+    TEST_ASSERT_EQUAL(AST_EXPR_STRING, program->commands[0].assignment.expression->type);
+    TEST_ASSERT_EQUAL_STRING("ana", program->commands[0].assignment.expression->string_value);
+
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_parser_parses_indexed_rvalue_access(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro nums[10];\n"
+        "inteiro x;\n"
+        "inicio\n"
+        "  x <- nums[3];\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    const ASTExpression *expr = program->commands[0].assignment.expression;
+
+    TEST_ASSERT_EQUAL(AST_EXPR_INDEX, expr->type);
+    TEST_ASSERT_EQUAL_STRING("nums", expr->index_access.name);
+    TEST_ASSERT_NOT_NULL(expr->index_access.index);
+    TEST_ASSERT_EQUAL(AST_EXPR_INT, expr->index_access.index->type);
+    TEST_ASSERT_EQUAL_INT(3, expr->index_access.index->int_value);
+
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_parser_builds_assignment_ast_with_expected_counts_and_shape);
@@ -484,5 +542,8 @@ int main(void) {
     RUN_TEST(test_parser_accepts_optional_top_level_procedures_before_program);
     RUN_TEST(test_parser_accepts_void_call_command_and_return_without_expression);
     RUN_TEST(test_ast_procedure_free_releases_owned_members_and_resets_fields);
+    RUN_TEST(test_parser_parses_indexed_declarations_and_indexed_assignment);
+    RUN_TEST(test_parser_parses_string_literal_expression);
+    RUN_TEST(test_parser_parses_indexed_rvalue_access);
     return UNITY_END();
 }
