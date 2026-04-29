@@ -344,6 +344,19 @@ static size_t symbol_capacity_at(
     return 0;
 }
 
+static ASTType symbol_type_at(
+    const ASTProgram *program, const SymbolInfo *globals, size_t global_count, size_t index) {
+    if (globals != NULL && index < global_count) {
+        return globals[index].type;
+    }
+
+    if (program != NULL && program->declarations != NULL && index < program->declaration_count) {
+        return program->declarations[index].type;
+    }
+
+    return AST_TYPE_INTEIRO;
+}
+
 static bool builder_append_booleanize(StringBuilder *builder, const char *register_name, const char *byte_register_name) {
     return builder_appendf(
         builder,
@@ -530,6 +543,7 @@ static bool procedure_expression_supports_integer_backend(const ASTExpression *e
 
     switch (expression->type) {
         case AST_EXPR_INT:
+        case AST_EXPR_STRING:
         case AST_EXPR_IDENTIFIER:
             return true;
         case AST_EXPR_FLOAT:
@@ -589,6 +603,54 @@ static bool find_global_declaration_type(const ASTProgram *program, const char *
     return false;
 }
 
+static size_t find_global_declaration_capacity(const ASTProgram *program, const char *name) {
+    size_t index;
+
+    if (program == NULL || name == NULL) {
+        return 0;
+    }
+
+    for (index = 0; index < program->declaration_count; ++index) {
+        if (strcmp(program->declarations[index].name, name) == 0) {
+            return program->declarations[index].capacity;
+        }
+    }
+
+    return 0;
+}
+
+static ASTType find_context_variable_type(
+    const ASTDeclaration *proc_locals, size_t proc_local_count, const ASTProgram *program, const char *name) {
+    size_t i;
+    ASTType type = AST_TYPE_INTEIRO;
+
+    if (proc_locals != NULL) {
+        for (i = 0; i < proc_local_count; i++) {
+            if (strcmp(proc_locals[i].name, name) == 0) {
+                return proc_locals[i].type;
+            }
+        }
+    }
+
+    find_global_declaration_type(program, name, &type);
+    return type;
+}
+
+static size_t find_context_variable_capacity(
+    const ASTDeclaration *proc_locals, size_t proc_local_count, const ASTProgram *program, const char *name) {
+    size_t i;
+
+    if (proc_locals != NULL) {
+        for (i = 0; i < proc_local_count; i++) {
+            if (strcmp(proc_locals[i].name, name) == 0) {
+                return proc_locals[i].capacity;
+            }
+        }
+    }
+
+    return find_global_declaration_capacity(program, name);
+}
+
 static bool find_procedure_signature_type(
     const SemanticInfo *semantic, const char *name, ASTType *out_return_type) {
     size_t index;
@@ -620,6 +682,7 @@ static bool main_expression_supports_integer_backend(
 
     switch (expression->type) {
         case AST_EXPR_INT:
+        case AST_EXPR_STRING:
             return true;
         case AST_EXPR_FLOAT:
             return fail_float_expression_codegen(error, expression->line, expression->column);
@@ -896,6 +959,109 @@ static bool procedure_supports_integer_backend(const ASTProcedure *procedure, Co
     return true;
 }
 
+static bool generate_string_literal_copy(
+    CodegenContext *context, const char *target_name, const char *literal) {
+    StringBuilder *builder = context->builder;
+    size_t i, len;
+
+    /* Fail for local string targets: frame byte layout is not yet implemented. */
+    if (context->proc_locals != NULL) {
+        for (i = 0; i < context->proc_local_count; i++) {
+            if (strcmp(context->proc_locals[i].name, target_name) == 0) {
+                return false;
+            }
+        }
+    }
+
+    len = (literal != NULL) ? strlen(literal) : 0;
+
+    if (len == 0) {
+        return builder_appendf(builder, "    mov byte [%s], 0\n", target_name);
+    }
+
+    if (!builder_appendf(builder, "    mov byte [%s], '%c'\n", target_name, (unsigned char)literal[0])) {
+        return false;
+    }
+
+    for (i = 1; i < len; i++) {
+        if (!builder_appendf(builder, "    mov byte [%s+%zu], '%c'\n", target_name, i, (unsigned char)literal[i])) {
+            return false;
+        }
+    }
+
+    return builder_appendf(builder, "    mov byte [%s+%zu], 0\n", target_name, len);
+}
+
+static bool generate_string_address(CodegenContext *context, const char *var_name) {
+    size_t i;
+
+    if (context->proc_locals != NULL) {
+        for (i = 0; i < context->proc_local_count; i++) {
+            if (strcmp(context->proc_locals[i].name, var_name) == 0) {
+                size_t base_offset = local_declaration_frame_offset(context->proc_locals, i);
+                return builder_appendf(context->builder, "    lea eax, [ebp-%zu]\n", base_offset);
+            }
+        }
+    }
+
+    return builder_appendf(context->builder, "    mov eax, %s\n", var_name);
+}
+
+static bool builder_append_print_string_helper(StringBuilder *builder) {
+    return builder_append(
+        builder,
+        "\nprint_string:\n"
+        "    mov esi, eax\n"
+        "    xor edx, edx\n"
+        ".print_string_len:\n"
+        "    cmp byte [esi + edx], 0\n"
+        "    je .print_string_write\n"
+        "    inc edx\n"
+        "    jmp .print_string_len\n"
+        ".print_string_write:\n"
+        "    test edx, edx\n"
+        "    jz .print_string_done\n"
+        "    mov ecx, esi\n"
+        "    mov eax, 4\n"
+        "    mov ebx, 1\n"
+        "    int 0x80\n"
+        ".print_string_done:\n"
+        "    ret\n");
+}
+
+static bool builder_append_read_string_helper(StringBuilder *builder) {
+    return builder_append(
+        builder,
+        "\nread_string:\n"
+        "    push esi\n"
+        "    mov esi, eax\n"
+        "    mov ecx, eax\n"
+        "    mov eax, 3\n"
+        "    mov ebx, 0\n"
+        "    int 0x80\n"
+        "    test eax, eax\n"
+        "    jle .read_string_empty\n"
+        "    mov edx, eax\n"
+        "    xor eax, eax\n"
+        ".read_string_scan:\n"
+        "    cmp eax, edx\n"
+        "    jae .read_string_null\n"
+        "    cmp byte [esi + eax], 10\n"
+        "    je .read_string_null\n"
+        "    cmp byte [esi + eax], 13\n"
+        "    je .read_string_null\n"
+        "    inc eax\n"
+        "    jmp .read_string_scan\n"
+        ".read_string_null:\n"
+        "    mov byte [esi + eax], 0\n"
+        "    pop esi\n"
+        "    ret\n"
+        ".read_string_empty:\n"
+        "    mov byte [esi], 0\n"
+        "    pop esi\n"
+        "    ret\n");
+}
+
 static bool generate_expression(CodegenContext *context, const ASTExpression *expression, CompilerError *error) {
     StringBuilder *builder = context->builder;
 
@@ -1101,6 +1267,13 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
                        builder_append(builder, "    mov dword [edx], eax\n");
             }
 
+            if (command->assignment.expression != NULL && command->assignment.expression->type == AST_EXPR_STRING) {
+                return generate_string_literal_copy(
+                    context,
+                    command->assignment.target.identifier,
+                    command->assignment.expression->string_value);
+            }
+
             if (command->assignment.expression != NULL && command->assignment.expression->type == AST_EXPR_INT) {
                 return generate_store_int_to_name(context, command->assignment.target.identifier,
                                                   command->assignment.expression->int_value);
@@ -1109,16 +1282,54 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
             return generate_expression(context, command->assignment.expression, error) &&
                    generate_store_eax_to_name(context, command->assignment.target.identifier);
         }
-        case AST_COMMAND_READ:
+        case AST_COMMAND_READ: {
+            const char *rname = command->read.name;
+            ASTType rtype = find_context_variable_type(
+                context->proc_locals, context->proc_local_count, context->program, rname);
+
+            if (rtype == AST_TYPE_STRING) {
+                size_t cap = find_context_variable_capacity(
+                    context->proc_locals, context->proc_local_count, context->program, rname);
+                size_t max_read = cap > 1 ? cap - 1 : 0;
+
+                return generate_string_address(context, rname) &&
+                       builder_appendf(builder, "    mov edx, %zu\n", max_read) &&
+                       builder_append(builder, "    call read_string\n");
+            }
+
             return builder_append(builder, "    call read_int\n") &&
-                   generate_store_eax_to_name(context, command->read.name);
-        case AST_COMMAND_WRITE:
-            return generate_expression(context, command->write.expression, error) &&
+                   generate_store_eax_to_name(context, rname);
+        }
+        case AST_COMMAND_WRITE: {
+            const ASTExpression *wexpr = command->write.expression;
+
+            if (wexpr != NULL && wexpr->type == AST_EXPR_IDENTIFIER &&
+                find_context_variable_type(
+                    context->proc_locals, context->proc_local_count, context->program, wexpr->identifier) ==
+                    AST_TYPE_STRING) {
+                return generate_string_address(context, wexpr->identifier) &&
+                       builder_append(builder, "    call print_string\n");
+            }
+
+            return generate_expression(context, wexpr, error) &&
                    builder_append(builder, "    call print_int\n");
-        case AST_COMMAND_WRITELN:
-            return generate_expression(context, command->write.expression, error) &&
+        }
+        case AST_COMMAND_WRITELN: {
+            const ASTExpression *wexpr = command->write.expression;
+
+            if (wexpr != NULL && wexpr->type == AST_EXPR_IDENTIFIER &&
+                find_context_variable_type(
+                    context->proc_locals, context->proc_local_count, context->program, wexpr->identifier) ==
+                    AST_TYPE_STRING) {
+                return generate_string_address(context, wexpr->identifier) &&
+                       builder_append(builder, "    call print_string\n") &&
+                       builder_append(builder, "    call print_newline\n");
+            }
+
+            return generate_expression(context, wexpr, error) &&
                    builder_append(builder, "    call print_int\n") &&
                    builder_append(builder, "    call print_newline\n");
+        }
         case AST_COMMAND_CALL: {
             const ASTCall *call = &command->call_command.call;
             size_t arg_i;
@@ -1506,7 +1717,9 @@ static bool generate_helpers(StringBuilder *builder) {
                "    mov ecx, newline\n"
                "    mov edx, 1\n"
                "    int 0x80\n"
-               "    ret\n");
+               "    ret\n") &&
+           builder_append_print_string_helper(builder) &&
+           builder_append_read_string_helper(builder);
 }
 
 bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *semantic, char **out_assembly, CompilerError *error) {
@@ -1568,8 +1781,11 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
         }
 
         if (storage == AST_STORAGE_INDEXED && capacity > 0) {
+            ASTType var_type = symbol_type_at(program, globals, global_count, index);
+            const char *unit = (var_type == AST_TYPE_STRING) ? "db" : "dd";
+
             if (!builder_append_user_symbol_name(&builder, &for_loop_ids, name) ||
-                !builder_appendf(&builder, " times %zu dd 0\n", capacity)) {
+                !builder_appendf(&builder, " times %zu %s 0\n", capacity, unit)) {
                 goto fail;
             }
         } else if (!builder_append_user_symbol_declaration(&builder, &for_loop_ids, name)) {

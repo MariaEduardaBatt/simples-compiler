@@ -763,6 +763,35 @@ void test_codegen_rejects_string_indexed_write_in_main_with_explicit_error(void)
         "Code generation for string-indexed expressions is not supported yet.", error.message);
 }
 
+void test_codegen_copies_string_literal_into_fixed_buffer(void) {
+    char *assembly = generate_source(
+        "programa demo\n"
+        "string nome[8];\n"
+        "inicio\n"
+        "  nome <- \"ana\";\n"
+        "fim");
+
+    assert_contains(assembly, "mov byte [nome], 'a'");
+    assert_contains(assembly, "mov byte [nome+1], 'n'");
+    assert_contains(assembly, "mov byte [nome+2], 'a'");
+    assert_contains(assembly, "mov byte [nome+3], 0");
+    free(assembly);
+}
+
+void test_codegen_emits_string_write_loop_for_escreval(void) {
+    char *assembly = generate_source(
+        "programa demo\n"
+        "string nome[8];\n"
+        "inicio\n"
+        "  nome <- \"oi\";\n"
+        "  escreval nome;\n"
+        "fim");
+
+    assert_contains(assembly, "call print_string");
+    assert_contains(assembly, "call print_newline");
+    free(assembly);
+}
+
 void test_codegen_rejects_string_indexed_read_in_procedure_with_explicit_error(void) {
     CompilerError error = {0};
     char *assembly = generate_source_with_error(
@@ -831,5 +860,7 @@ int main(void) {
     RUN_TEST(test_codegen_rejects_string_indexed_read_in_main_with_explicit_error);
     RUN_TEST(test_codegen_rejects_string_indexed_write_in_main_with_explicit_error);
     RUN_TEST(test_codegen_rejects_string_indexed_read_in_procedure_with_explicit_error);
+    RUN_TEST(test_codegen_copies_string_literal_into_fixed_buffer);
+    RUN_TEST(test_codegen_emits_string_write_loop_for_escreval);
     return UNITY_END();
 }
