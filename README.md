@@ -333,6 +333,29 @@ fim
 
 ---
 
+## Futuras Implementações
+
+Algumas melhorias naturais para evoluir a gramática e a linguagem no futuro:
+
+- Retorno de vetores e matrizes
+- Matrizes com mais de 2 dimensões
+- Passagem de matriz por valor
+- Vetores numéricos por referência
+- `string` sem capacidade fixa na gramática, com regras semânticas próprias
+- Inicialização de vetores e matrizes na declaração
+- Literais agregados, como vetores e matrizes inline
+- Operador de resto `%`
+- Operador `/` para divisão real explícita, separado de `div`
+- Incremento de passo implícito em `para ... ate` quando `passo` for omitido
+- Faixas e slices em agregados, como `v[1:3]`
+- Recursão e funções auxiliares mais confortáveis para algoritmos matriciais genéricos
+- Tipos derivados nomeados, como `tipo matriz3 = inteiro[3][3]`
+- Sobrecarga ou formas mais ricas de assinatura para procedimentos
+
+Essas extensões ajudariam principalmente em algoritmos numéricos, manipulação de agregados e redução de verbosidade em programas maiores.
+
+---
+
 ## Stack Técnica
 
 | Componente | Tecnologia | Papel no projeto |
