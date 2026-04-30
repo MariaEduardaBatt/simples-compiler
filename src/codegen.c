@@ -921,7 +921,9 @@ static bool find_context_variable_info(
     const char *name,
     ASTType *out_type,
     ASTStorageKind *out_storage,
-    size_t *out_capacity) {
+    size_t *out_capacity,
+    size_t *out_dimension_count,
+    size_t *out_row_capacity) {
     size_t i;
     ASTType type;
 
@@ -941,6 +943,12 @@ static bool find_context_variable_info(
                 if (out_capacity != NULL) {
                     *out_capacity = parameters[i].capacity;
                 }
+                if (out_dimension_count != NULL) {
+                    *out_dimension_count = parameters[i].dimension_count;
+                }
+                if (out_row_capacity != NULL) {
+                    *out_row_capacity = parameters[i].row_capacity;
+                }
                 return true;
             }
         }
@@ -957,6 +965,12 @@ static bool find_context_variable_info(
                 }
                 if (out_capacity != NULL) {
                     *out_capacity = proc_locals[i].capacity;
+                }
+                if (out_dimension_count != NULL) {
+                    *out_dimension_count = proc_locals[i].dimension_count;
+                }
+                if (out_row_capacity != NULL) {
+                    *out_row_capacity = proc_locals[i].row_capacity;
                 }
                 return true;
             }
@@ -981,6 +995,21 @@ static bool find_context_variable_info(
         if (out_capacity != NULL) {
             *out_capacity = find_global_declaration_capacity(program, name);
         }
+        if (out_dimension_count != NULL || out_row_capacity != NULL) {
+            size_t index;
+
+            for (index = 0; index < program->declaration_count; ++index) {
+                if (strcmp(program->declarations[index].name, name) == 0) {
+                    if (out_dimension_count != NULL) {
+                        *out_dimension_count = program->declarations[index].dimension_count;
+                    }
+                    if (out_row_capacity != NULL) {
+                        *out_row_capacity = program->declarations[index].row_capacity;
+                    }
+                    break;
+                }
+            }
+        }
         return true;
     }
 
@@ -997,7 +1026,7 @@ static ASTType find_context_variable_type(
     ASTType type = AST_TYPE_INTEIRO;
 
     find_context_variable_info(
-        parameters, parameter_count, proc_locals, proc_local_count, program, name, &type, NULL, NULL);
+        parameters, parameter_count, proc_locals, proc_local_count, program, name, &type, NULL, NULL, NULL, NULL);
     return type;
 }
 
@@ -1011,8 +1040,67 @@ static size_t find_context_variable_capacity(
     size_t capacity = 0;
 
     find_context_variable_info(
-        parameters, parameter_count, proc_locals, proc_local_count, program, name, NULL, NULL, &capacity);
+        parameters, parameter_count, proc_locals, proc_local_count, program, name, NULL, NULL, &capacity, NULL, NULL);
     return capacity;
+}
+
+static size_t find_context_variable_dimension_count(
+    const ASTParameter *parameters,
+    size_t parameter_count,
+    const ASTDeclaration *proc_locals,
+    size_t proc_local_count,
+    const ASTProgram *program,
+    const char *name) {
+    size_t dimension_count = 0;
+
+    find_context_variable_info(
+        parameters, parameter_count, proc_locals, proc_local_count, program, name, NULL, NULL, NULL, &dimension_count, NULL);
+    return dimension_count;
+}
+
+static size_t find_context_variable_row_capacity(
+    const ASTParameter *parameters,
+    size_t parameter_count,
+    const ASTDeclaration *proc_locals,
+    size_t proc_local_count,
+    const ASTProgram *program,
+    const char *name) {
+    size_t row_capacity = 0;
+
+    find_context_variable_info(
+        parameters, parameter_count, proc_locals, proc_local_count, program, name, NULL, NULL, NULL, NULL, &row_capacity);
+    return row_capacity;
+}
+
+static bool generate_linearized_index(
+    CodegenContext *context, const ASTIndexedAccess *access, CompilerError *error) {
+    size_t dimension_count = find_context_variable_dimension_count(
+        context->parameters,
+        context->parameter_count,
+        context->proc_locals,
+        context->proc_local_count,
+        context->program,
+        access->name);
+
+    if (dimension_count >= 2 && access->index2 != NULL) {
+        size_t row_capacity = find_context_variable_row_capacity(
+            context->parameters,
+            context->parameter_count,
+            context->proc_locals,
+            context->proc_local_count,
+            context->program,
+            access->name);
+
+        return generate_expression(context, access->index, error) &&
+               builder_append(context->builder, "    push eax\n") &&
+               generate_expression(context, access->index2, error) &&
+               builder_append(context->builder, "    mov ebx, eax\n") &&
+               builder_append(context->builder, "    pop eax\n") &&
+               builder_appendf(context->builder, "    imul eax, %zu\n", row_capacity) &&
+               builder_append(context->builder, "    add eax, ebx\n");
+    }
+
+    return generate_expression(context, access->index, error);
 }
 
 static bool infer_expression_type(
@@ -1046,6 +1134,8 @@ static bool infer_expression_type(
                 expression->identifier,
                 out_type,
                 NULL,
+                NULL,
+                NULL,
                 NULL);
         case AST_EXPR_INDEX:
             if (!find_context_variable_info(
@@ -1056,6 +1146,8 @@ static bool infer_expression_type(
                     context->program,
                     expression->index_access.name,
                     &left_type,
+                    NULL,
+                    NULL,
                     NULL,
                     NULL)) {
                 return false;
@@ -1232,7 +1324,8 @@ static bool main_expression_supports_backend(
 
             return true;
         case AST_EXPR_INDEX:
-            return main_expression_supports_backend(expression->index_access.index, program, semantic, error);
+            return main_expression_supports_backend(expression->index_access.index, program, semantic, error) &&
+                   main_expression_supports_backend(expression->index_access.index2, program, semantic, error);
         default:
             compiler_error_set(
                 error,
@@ -1369,7 +1462,8 @@ static bool collect_string_literals_in_expression(StringLiteralList *list, size_
         case AST_EXPR_STRING:
             return string_literal_list_append(list, expression, (*next_label_id)++);
         case AST_EXPR_INDEX:
-            return collect_string_literals_in_expression(list, next_label_id, expression->index_access.index);
+            return collect_string_literals_in_expression(list, next_label_id, expression->index_access.index) &&
+                   collect_string_literals_in_expression(list, next_label_id, expression->index_access.index2);
         case AST_EXPR_CAST:
             return collect_string_literals_in_expression(list, next_label_id, expression->cast.operand);
         case AST_EXPR_CALL:
@@ -1401,7 +1495,8 @@ static bool collect_string_literals_in_commands(
                     return false;
                 }
                 if (command->assignment.target.type == AST_TARGET_INDEXED &&
-                    !collect_string_literals_in_expression(list, next_label_id, command->assignment.target.indexed.index)) {
+                    (!collect_string_literals_in_expression(list, next_label_id, command->assignment.target.indexed.index) ||
+                     !collect_string_literals_in_expression(list, next_label_id, command->assignment.target.indexed.index2))) {
                     return false;
                 }
                 break;
@@ -1444,6 +1539,11 @@ static bool collect_string_literals_in_commands(
                 }
                 break;
             case AST_COMMAND_READ:
+                if (command->read.target_type == AST_TARGET_INDEXED &&
+                    (!collect_string_literals_in_expression(list, next_label_id, command->read.index) ||
+                     !collect_string_literals_in_expression(list, next_label_id, command->read.index2))) {
+                    return false;
+                }
                 break;
         }
     }
@@ -1483,7 +1583,8 @@ static bool collect_string_return_temps_in_expression(
 
     switch (expression->type) {
         case AST_EXPR_INDEX:
-            return collect_string_return_temps_in_expression(list, next_label_id, semantic, expression->index_access.index);
+            return collect_string_return_temps_in_expression(list, next_label_id, semantic, expression->index_access.index) &&
+                   collect_string_return_temps_in_expression(list, next_label_id, semantic, expression->index_access.index2);
         case AST_EXPR_CAST:
             return collect_string_return_temps_in_expression(list, next_label_id, semantic, expression->cast.operand);
         case AST_EXPR_CALL:
@@ -1533,7 +1634,8 @@ static bool collect_string_return_temps_in_commands(
                     return false;
                 }
                 if (command->assignment.target.type == AST_TARGET_INDEXED &&
-                    !collect_string_return_temps_in_expression(list, next_label_id, semantic, command->assignment.target.indexed.index)) {
+                    (!collect_string_return_temps_in_expression(list, next_label_id, semantic, command->assignment.target.indexed.index) ||
+                     !collect_string_return_temps_in_expression(list, next_label_id, semantic, command->assignment.target.indexed.index2))) {
                     return false;
                 }
                 break;
@@ -1604,6 +1706,11 @@ static bool collect_string_return_temps_in_commands(
                 }
                 break;
             case AST_COMMAND_READ:
+                if (command->read.target_type == AST_TARGET_INDEXED &&
+                    (!collect_string_return_temps_in_expression(list, next_label_id, semantic, command->read.index) ||
+                     !collect_string_return_temps_in_expression(list, next_label_id, semantic, command->read.index2))) {
+                    return false;
+                }
                 break;
         }
     }
@@ -1661,7 +1768,8 @@ static bool collect_float_literals_in_expression(FloatLiteralList *list, size_t 
             return collect_float_literals_in_expression(list, next_label_id, expression->binary.left) &&
                    collect_float_literals_in_expression(list, next_label_id, expression->binary.right);
         case AST_EXPR_INDEX:
-            return collect_float_literals_in_expression(list, next_label_id, expression->index_access.index);
+            return collect_float_literals_in_expression(list, next_label_id, expression->index_access.index) &&
+                   collect_float_literals_in_expression(list, next_label_id, expression->index_access.index2);
         case AST_EXPR_INT:
         case AST_EXPR_STRING:
         case AST_EXPR_IDENTIFIER:
@@ -1685,8 +1793,10 @@ static bool collect_float_literals_in_commands(
             case AST_COMMAND_ASSIGNMENT:
                 if (!collect_float_literals_in_expression(list, next_label_id, command->assignment.expression) ||
                     (command->assignment.target.type == AST_TARGET_INDEXED &&
-                     !collect_float_literals_in_expression(
-                         list, next_label_id, command->assignment.target.indexed.index))) {
+                     (!collect_float_literals_in_expression(
+                          list, next_label_id, command->assignment.target.indexed.index) ||
+                      !collect_float_literals_in_expression(
+                          list, next_label_id, command->assignment.target.indexed.index2)))) {
                     return false;
                 }
                 break;
@@ -1735,6 +1845,11 @@ static bool collect_float_literals_in_commands(
                 }
                 break;
             case AST_COMMAND_READ:
+                if (command->read.target_type == AST_TARGET_INDEXED &&
+                    (!collect_float_literals_in_expression(list, next_label_id, command->read.index) ||
+                     !collect_float_literals_in_expression(list, next_label_id, command->read.index2))) {
+                    return false;
+                }
                 break;
             default:
                 return false;
@@ -1964,7 +2079,7 @@ static bool generate_float_index_load(CodegenContext *context, const ASTIndexedA
 
     parameter = find_context_parameter(context->parameters, context->parameter_count, access->name, &parameter_index);
     if (parameter != NULL && parameter->storage == AST_STORAGE_INDEXED) {
-        return generate_expression(context, access->index, error) &&
+        return generate_linearized_index(context, access, error) &&
                builder_append(context->builder, "    imul eax, 8\n") &&
                builder_append(context->builder, "    lea edx, [ebp + eax]\n") &&
                builder_appendf(
@@ -1977,7 +2092,7 @@ static bool generate_float_index_load(CodegenContext *context, const ASTIndexedA
         base_offset = local_declaration_base_offset_by_name(
             context->proc_locals, context->proc_local_count, access->name);
         if (base_offset > 0) {
-            return generate_expression(context, access->index, error) &&
+            return generate_linearized_index(context, access, error) &&
                    builder_append(context->builder, "    imul eax, 8\n") &&
                    builder_append(context->builder, "    neg eax\n") &&
                    builder_appendf(context->builder, "    lea edx, [ebp + eax - %zu]\n", base_offset) &&
@@ -1985,7 +2100,7 @@ static bool generate_float_index_load(CodegenContext *context, const ASTIndexedA
         }
     }
 
-    return generate_expression(context, access->index, error) &&
+    return generate_linearized_index(context, access, error) &&
            builder_append(context->builder, "    imul eax, 8\n") &&
            builder_append(context->builder, "    lea edx, [") &&
            builder_append_user_symbol_name(context->builder, context->for_loop_ids, access->name) &&
@@ -2013,7 +2128,7 @@ static bool generate_float_index_store(CodegenContext *context, const ASTIndexed
 
     parameter = find_context_parameter(context->parameters, context->parameter_count, access->name, &parameter_index);
     if (parameter != NULL && parameter->storage == AST_STORAGE_INDEXED) {
-        return generate_expression(context, access->index, error) &&
+        return generate_linearized_index(context, access, error) &&
                builder_append(context->builder, "    imul eax, 8\n") &&
                builder_append(context->builder, "    lea edx, [ebp + eax]\n") &&
                builder_appendf(
@@ -2026,7 +2141,7 @@ static bool generate_float_index_store(CodegenContext *context, const ASTIndexed
         base_offset = local_declaration_base_offset_by_name(
             context->proc_locals, context->proc_local_count, access->name);
         if (base_offset > 0) {
-            return generate_expression(context, access->index, error) &&
+            return generate_linearized_index(context, access, error) &&
                    builder_append(context->builder, "    imul eax, 8\n") &&
                    builder_append(context->builder, "    neg eax\n") &&
                    builder_appendf(context->builder, "    lea edx, [ebp + eax - %zu]\n", base_offset) &&
@@ -2034,7 +2149,7 @@ static bool generate_float_index_store(CodegenContext *context, const ASTIndexed
         }
     }
 
-    return generate_expression(context, access->index, error) &&
+    return generate_linearized_index(context, access, error) &&
            builder_append(context->builder, "    imul eax, 8\n") &&
            builder_append(context->builder, "    lea edx, [") &&
            builder_append_user_symbol_name(context->builder, context->for_loop_ids, access->name) &&
@@ -2590,7 +2705,7 @@ static bool generate_expression(CodegenContext *context, const ASTExpression *ex
                 parameter = find_context_parameter(
                     context->parameters, context->parameter_count, access->name, &parameter_index);
                 if (parameter != NULL && parameter->storage == AST_STORAGE_INDEXED) {
-                    return generate_expression(context, access->index, error) &&
+                    return generate_linearized_index(context, access, error) &&
                            builder_appendf(
                                builder,
                                "    mov edx, dword [ebp+%zu]\n",
@@ -2603,17 +2718,30 @@ static bool generate_expression(CodegenContext *context, const ASTExpression *ex
                     base_offset = local_declaration_base_offset_by_name(
                         context->proc_locals, context->proc_local_count, access->name);
                     if (base_offset > 0) {
-                        return generate_expression(context, access->index, error) &&
+                        return generate_linearized_index(context, access, error) &&
                                builder_appendf(builder, "    lea edx, [ebp + eax - %zu]\n", base_offset) &&
                                builder_append(builder, "    movzx eax, byte [edx]\n");
                     }
                 }
 
-                return generate_expression(context, access->index, error) &&
+                return generate_linearized_index(context, access, error) &&
                        builder_append(builder, "    lea edx, [") &&
                        builder_append_user_symbol_name(builder, context->for_loop_ids, access->name) &&
                        builder_append(builder, " + eax]\n") &&
                        builder_append(builder, "    movzx eax, byte [edx]\n");
+            }
+
+            parameter = find_context_parameter(
+                context->parameters, context->parameter_count, access->name, &parameter_index);
+            if (parameter != NULL && parameter->storage == AST_STORAGE_INDEXED) {
+                return generate_linearized_index(context, access, error) &&
+                       builder_append(builder, "    imul eax, 4\n") &&
+                       builder_appendf(
+                           builder,
+                           "    mov edx, dword [ebp+%zu]\n",
+                           parameter_stack_offset(context->current_procedure, context->parameters, context->parameter_count, parameter_index)) &&
+                       builder_append(builder, "    lea edx, [edx + eax]\n") &&
+                       builder_append(builder, "    mov eax, dword [edx]\n");
             }
 
             /* Local vector: elements stored descending from ebp (nums[0]=ebp-N, nums[1]=ebp-N-4...) */
@@ -2621,7 +2749,7 @@ static bool generate_expression(CodegenContext *context, const ASTExpression *ex
                 base_offset = local_declaration_base_offset_by_name(
                     context->proc_locals, context->proc_local_count, access->name);
                 if (base_offset > 0) {
-                    return generate_expression(context, access->index, error) &&
+                    return generate_linearized_index(context, access, error) &&
                            builder_append(builder, "    imul eax, 4\n") &&
                            builder_append(builder, "    neg eax\n") &&
                            builder_appendf(builder, "    lea edx, [ebp + eax - %zu]\n", base_offset) &&
@@ -2630,7 +2758,7 @@ static bool generate_expression(CodegenContext *context, const ASTExpression *ex
             }
 
             /* Global vector: elements stored ascending from label address */
-            return generate_expression(context, access->index, error) &&
+            return generate_linearized_index(context, access, error) &&
                    builder_append(builder, "    imul eax, 4\n") &&
                    builder_append(builder, "    lea edx, [") &&
                    builder_append_user_symbol_name(builder, context->for_loop_ids, access->name) &&
@@ -2685,7 +2813,7 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
                     parameter = find_context_parameter(
                         context->parameters, context->parameter_count, access->name, &parameter_index);
                     if (parameter != NULL && parameter->storage == AST_STORAGE_INDEXED) {
-                        return generate_expression(context, access->index, error) &&
+                        return generate_linearized_index(context, access, error) &&
                                builder_appendf(
                                    builder,
                                    "    mov edx, dword [ebp+%zu]\n",
@@ -2699,7 +2827,7 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
                         base_offset = local_declaration_base_offset_by_name(
                             context->proc_locals, context->proc_local_count, access->name);
                         if (base_offset > 0) {
-                            if (!generate_expression(context, access->index, error) ||
+                            if (!generate_linearized_index(context, access, error) ||
                                 !builder_appendf(builder, "    lea edx, [ebp + eax - %zu]\n", base_offset)) {
                                 return false;
                             }
@@ -2708,7 +2836,7 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
                         }
                     }
 
-                    return generate_expression(context, access->index, error) &&
+                    return generate_linearized_index(context, access, error) &&
                            builder_append(builder, "    lea edx, [") &&
                            builder_append_user_symbol_name(builder, context->for_loop_ids, access->name) &&
                            builder_append(builder, " + eax]\n") &&
@@ -2716,11 +2844,25 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
                            builder_append(builder, "    mov byte [edx], al\n");
                 }
 
+                parameter = find_context_parameter(
+                    context->parameters, context->parameter_count, access->name, &parameter_index);
+                if (parameter != NULL && parameter->storage == AST_STORAGE_INDEXED) {
+                    return generate_linearized_index(context, access, error) &&
+                           builder_append(builder, "    imul eax, 4\n") &&
+                           builder_appendf(
+                               builder,
+                               "    mov edx, dword [ebp+%zu]\n",
+                               parameter_stack_offset(context->current_procedure, context->parameters, context->parameter_count, parameter_index)) &&
+                           builder_append(builder, "    lea edx, [edx + eax]\n") &&
+                           builder_append(builder, "    pop eax\n") &&
+                           builder_append(builder, "    mov dword [edx], eax\n");
+                }
+
                 if (context->proc_locals != NULL) {
                     base_offset = local_declaration_base_offset_by_name(
                         context->proc_locals, context->proc_local_count, access->name);
                     if (base_offset > 0) {
-                        if (!generate_expression(context, access->index, error) ||
+                        if (!generate_linearized_index(context, access, error) ||
                             !builder_append(builder, "    imul eax, 4\n") ||
                             !builder_append(builder, "    neg eax\n") ||
                             !builder_appendf(builder, "    lea edx, [ebp + eax - %zu]\n", base_offset)) {
@@ -2732,7 +2874,7 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
                 }
 
                 /* Global vector */
-                return generate_expression(context, access->index, error) &&
+                return generate_linearized_index(context, access, error) &&
                        builder_append(builder, "    imul eax, 4\n") &&
                        builder_append(builder, "    lea edx, [") &&
                        builder_append_user_symbol_name(builder, context->for_loop_ids, access->name) &&
@@ -2762,6 +2904,8 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
                     context->program,
                     command->assignment.target.identifier,
                     &target_type,
+                    NULL,
+                    NULL,
                     NULL,
                     NULL) &&
                 target_type == AST_TYPE_FLUTUANTE &&
@@ -2808,6 +2952,87 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
                 context->proc_local_count,
                 context->program,
                 rname);
+
+            if (command->read.target_type == AST_TARGET_INDEXED) {
+                ASTIndexedAccess access = {
+                    .name = command->read.name,
+                    .index = command->read.index,
+                    .index2 = command->read.index2,
+                    .line = command->read.line,
+                    .column = command->read.column,
+                };
+
+                if (rtype == AST_TYPE_FLUTUANTE) {
+                    return builder_append(builder, "    call read_float\n") &&
+                           generate_float_index_store(context, &access, error);
+                }
+
+                if (!builder_append(builder, "    call read_int\n") ||
+                    !builder_append(builder, "    push eax\n")) {
+                    return false;
+                }
+
+                if (rtype == AST_TYPE_STRING) {
+                    size_t base_offset;
+                    size_t parameter_index;
+                    const ASTParameter *parameter =
+                        find_context_parameter(context->parameters, context->parameter_count, rname, &parameter_index);
+
+                    if (parameter != NULL && parameter->storage == AST_STORAGE_INDEXED) {
+                        return generate_linearized_index(context, &access, error) &&
+                               builder_appendf(
+                                   builder,
+                                   "    mov edx, dword [ebp+%zu]\n",
+                                   parameter_stack_offset(context->current_procedure, context->parameters, context->parameter_count, parameter_index)) &&
+                               builder_append(builder, "    add edx, eax\n") &&
+                               builder_append(builder, "    pop eax\n") &&
+                               builder_append(builder, "    mov byte [edx], al\n");
+                    }
+
+                    if (context->proc_locals != NULL) {
+                        base_offset = local_declaration_base_offset_by_name(
+                            context->proc_locals, context->proc_local_count, rname);
+                        if (base_offset > 0) {
+                            return generate_linearized_index(context, &access, error) &&
+                                   builder_appendf(builder, "    lea edx, [ebp + eax - %zu]\n", base_offset) &&
+                                   builder_append(builder, "    pop eax\n") &&
+                                   builder_append(builder, "    mov byte [edx], al\n");
+                        }
+                    }
+
+                    return generate_linearized_index(context, &access, error) &&
+                           builder_append(builder, "    lea edx, [") &&
+                           builder_append_user_symbol_name(builder, context->for_loop_ids, rname) &&
+                           builder_append(builder, " + eax]\n") &&
+                           builder_append(builder, "    pop eax\n") &&
+                           builder_append(builder, "    mov byte [edx], al\n");
+                }
+
+                {
+                    size_t base_offset;
+
+                    if (context->proc_locals != NULL) {
+                        base_offset = local_declaration_base_offset_by_name(
+                            context->proc_locals, context->proc_local_count, rname);
+                        if (base_offset > 0) {
+                            return generate_linearized_index(context, &access, error) &&
+                                   builder_append(builder, "    imul eax, 4\n") &&
+                                   builder_append(builder, "    neg eax\n") &&
+                                   builder_appendf(builder, "    lea edx, [ebp + eax - %zu]\n", base_offset) &&
+                                   builder_append(builder, "    pop eax\n") &&
+                                   builder_append(builder, "    mov dword [edx], eax\n");
+                        }
+                    }
+                }
+
+                return generate_linearized_index(context, &access, error) &&
+                       builder_append(builder, "    imul eax, 4\n") &&
+                       builder_append(builder, "    lea edx, [") &&
+                       builder_append_user_symbol_name(builder, context->for_loop_ids, rname) &&
+                       builder_append(builder, " + eax]\n") &&
+                       builder_append(builder, "    pop eax\n") &&
+                       builder_append(builder, "    mov dword [edx], eax\n");
+            }
 
             if (rtype == AST_TYPE_STRING) {
                 size_t cap = find_context_variable_capacity(
@@ -3093,7 +3318,7 @@ static bool generate_push_call_argument(
                 return false;
             }
 
-            return generate_string_address(context, expression->identifier) &&
+            return generate_aggregate_address(context, expression->identifier) &&
                    builder_append(context->builder, "    push eax\n");
         }
 

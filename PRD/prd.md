@@ -131,14 +131,20 @@ ld -m elf_i386 programa.o -o programa
 <procedimento>    ::= "procedimento" <tipo_retorno> ID "(" [ <parametros> ] ")"
                       "inicio" <declaracoes_locais> <comandos> "fim"
 <parametros>      ::= <parametro> { "," <parametro> }
-<parametro>       ::= <tipo> ID [ "[" NUM_INT "]" ] [ "valor" ]
+<parametro>       ::= <parametro_numerico> | <parametro_string>
+<parametro_numerico> ::= <tipo_numerico> ID [ "[" NUM_INT "]" [ "[" NUM_INT "]" ] ] [ "valor" ]
+<parametro_string> ::= "string" ID "[" NUM_INT "]" [ "valor" ]
 <tipo_retorno>    ::= "inteiro" | "flutuante" | "vazio" | "string" "[" NUM_INT "]"
 
 <declaracoes_globais> ::= { <declaracao> }
 <declaracoes_locais>  ::= { <declaracao> }
-<declaracao>      ::= <tipo> <item_declaracao> { "," <item_declaracao> } ";"
-<item_declaracao> ::= ID [ "[" NUM_INT "]" ]
-<tipo>            ::= "inteiro" | "flutuante" | "string"
+<declaracao>      ::= <declaracao_numerica> | <declaracao_string>
+<declaracao_numerica> ::= <tipo_numerico> <item_declaracao_numerico> { "," <item_declaracao_numerico> } ";"
+<declaracao_string> ::= "string" <item_declaracao_string> { "," <item_declaracao_string> } ";"
+<item_declaracao_numerico> ::= ID [ "[" NUM_INT "]" [ "[" NUM_INT "]" ] ]
+<item_declaracao_string> ::= ID [ "[" NUM_INT "]" ]
+<tipo>            ::= <tipo_numerico> | "string"
+<tipo_numerico>   ::= "inteiro" | "flutuante"
 
 <comandos>        ::= { <comando> }
 <comando>         ::= <atribuicao>
@@ -150,13 +156,14 @@ ld -m elf_i386 programa.o -o programa
                     | <cmd_chamada>
                     | <cmd_retorna>
 
-<atribuivel>      ::= ID | ID "[" <expressao> "]"
+<atribuivel>      ::= ID | <acesso_indexado>
 <atribuicao>      ::= <atribuivel> "<-" <expressao> ";"
-<cmd_leia>        ::= "leia" ID ";"
+<cmd_leia>        ::= "leia" <atribuivel> ";"
 <cmd_escreva>     ::= ("escreva" | "escreval") <expressao> ";"
 <cmd_chamada>     ::= ID "(" [ <argumentos> ] ")" ";"
 <cmd_retorna>     ::= "retorna" [ <expressao> ] ";"
 <argumentos>      ::= <expressao> { "," <expressao> }
+<acesso_indexado> ::= ID "[" <expressao> "]" [ "[" <expressao> "]" ]
 
 <cmd_se>          ::= "se" <expressao> "entao" <comandos>
                       [ "senao" <comandos> ] "fimse"
@@ -173,7 +180,7 @@ ld -m elf_i386 programa.o -o programa
 <expr_aditiva>    ::= <expr_mult> { ("+" | "-") <expr_mult> }
 <expr_mult>       ::= <fator> { ("*" | "div") <fator> }
 <fator>           ::= ID
-                    | ID "[" <expressao> "]"
+                    | <acesso_indexado>
                     | NUM_INT
                     | NUM_FLOAT
                     | STRING_LITERAL
@@ -873,7 +880,7 @@ Todas invocadas via `int 0x80`.
 
 - Geração de código para procedimentos `flutuante` já está coberta nesta entrega
 - Parâmetros vetoriais por referência em procedimentos
-- Matrizes 2D
+- Matrizes acima de 2 dimensões
 - Otimizações de código (constant folding, dead code elimination)
 - Suporte a Windows (PE/COFF)
 - Recuperação de erros (modo pânico) — o compilador para no primeiro erro
@@ -1059,13 +1066,13 @@ clean:
 
 ## Critérios de Aceite
 
-- [ ]  `make test` passa com 0 falhas em todos os módulos do compilador
-- [ ]  O exemplo `fatorial.simples` compila, monta e executa corretamente
+- [x]  `make test` passa com 0 falhas em todos os módulos do compilador
+- [x]  O exemplo `fatorial.simples` compila, monta e executa corretamente
 - [x]  O exemplo `fibonacci.simples` compila, monta e executa corretamente
-- [ ]  Laços aninhados geram labels únicos sem conflito
-- [ ]  Erros de variável não declarada são reportados com número de linha
-- [ ]  O `.asm` gerado não produz warnings no NASM
-- [ ]  O exemplo `procedure_sum.simples` compila, monta e executa produzindo o resultado correto
-- [ ]  O exemplo `procedure_void.simples` compila, monta e executa produzindo o resultado correto
+- [x]  Laços aninhados geram labels únicos sem conflito
+- [x]  Erros de variável não declarada são reportados com número de linha
+- [x]  O `.asm` gerado não produz warnings no NASM
+- [x]  O exemplo `procedure_sum.simples` compila, monta e executa produzindo o resultado correto
+- [x]  O exemplo `procedure_void.simples` compila, monta e executa produzindo o resultado correto
 - [x]  Procedimentos `flutuante` compilam, montam e executam corretamente
-- [ ]  Um arquivo sem procedimentos (só `programa`) continua compilando corretamente
+- [x]  Um arquivo sem procedimentos (só `programa`) continua compilando corretamente

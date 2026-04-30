@@ -133,6 +133,33 @@ ld -m elf_i386 programa.o -o programa
 
 ---
 
+## Funcionalidades Implementadas
+
+O compilador já suporta:
+
+- Variáveis escalares `inteiro`, `flutuante` e `string[n]`
+- Vetores 1D de `inteiro` e `flutuante`
+- Matrizes 2D de `inteiro` e `flutuante`
+- Acesso indexado, atribuição indexada e `leia` em elemento indexado
+- Procedimentos com retorno `inteiro`, `flutuante`, `vazio` e `string[n]`
+- Parâmetros escalares
+- Parâmetros `string[n]` por referência
+- Vetores 1D numéricos por valor com `valor`
+- Matrizes 2D numéricas por referência
+- Expressões aritméticas, relacionais e lógicas
+- Conversão explícita `inteiro(expr)` e `flutuante(expr)`
+- `se`, `senao`, `enquanto` e `para`
+- `leia`, `escreva` e `escreval`
+
+Restrições atuais:
+
+- Retorno de vetor ou matriz não é suportado
+- `string` sem capacidade fixa não é suportada em declaração, parâmetro ou retorno
+- `string` 2D não existe
+- Matriz 2D numérica não é passada por valor
+
+---
+
 ## Exemplo de Programa SIMPLES
 
 ```
@@ -188,12 +215,13 @@ make clean
 
 ## A Linguagem SIMPLES
 
-Linguagem didática em português estruturado com 47 tokens, incluindo:
+Linguagem didática em português estruturado com suporte atual a:
 
 - **Palavras-chave:** `programa`, `inicio`, `fim`, `se`, `entao`, `senao`, `enquanto`, `para`, `procedimento`, `retorna`, etc.
-- **Tipos:** `inteiro`, `flutuante`, `vazio`
+- **Tipos:** `inteiro`, `flutuante`, `string`, `vazio`
 - **E/S:** `leia`, `escreva`, `escreval`
 - **Operadores:** `<-` (atribuição), aritméticos, relacionais e lógicos (`e`, `ou`, `nao`)
+- **Agregados:** vetores 1D numéricos, matrizes 2D numéricas e `string[n]`
 - **Comentários:** `//` (linha) e `/* ... */` (bloco)
 
 Especificação completa da gramática em [`PRD/prd.md`](PRD/prd.md).
@@ -210,14 +238,20 @@ Especificação completa da gramática em [`PRD/prd.md`](PRD/prd.md).
 <procedimento>    ::= "procedimento" <tipo_retorno> ID "(" [ <parametros> ] ")"
                       "inicio" <declaracoes_locais> <comandos> "fim"
 <parametros>      ::= <parametro> { "," <parametro> }
-<parametro>       ::= <tipo> ID [ "[" NUM_INT "]" ] [ "valor" ]
+<parametro>       ::= <parametro_numerico> | <parametro_string>
+<parametro_numerico> ::= <tipo_numerico> ID [ "[" NUM_INT "]" [ "[" NUM_INT "]" ] ] [ "valor" ]
+<parametro_string> ::= "string" ID "[" NUM_INT "]" [ "valor" ]
 <tipo_retorno>    ::= "inteiro" | "flutuante" | "vazio" | "string" "[" NUM_INT "]"
 
 <declaracoes_globais> ::= { <declaracao> }
 <declaracoes_locais>  ::= { <declaracao> }
-<declaracao>      ::= <tipo> <item_declaracao> { "," <item_declaracao> } ";"
-<item_declaracao> ::= ID [ "[" NUM_INT "]" ]
-<tipo>            ::= "inteiro" | "flutuante" | "string"
+<declaracao>      ::= <declaracao_numerica> | <declaracao_string>
+<declaracao_numerica> ::= <tipo_numerico> <item_declaracao_numerico> { "," <item_declaracao_numerico> } ";"
+<declaracao_string> ::= "string" <item_declaracao_string> { "," <item_declaracao_string> } ";"
+<item_declaracao_numerico> ::= ID [ "[" NUM_INT "]" [ "[" NUM_INT "]" ] ]
+<item_declaracao_string> ::= ID [ "[" NUM_INT "]" ]
+<tipo>            ::= <tipo_numerico> | "string"
+<tipo_numerico>   ::= "inteiro" | "flutuante"
 
 <comandos>        ::= { <comando> }
 <comando>         ::= <atribuicao>
@@ -229,13 +263,14 @@ Especificação completa da gramática em [`PRD/prd.md`](PRD/prd.md).
                     | <cmd_chamada>
                     | <cmd_retorna>
 
-<atribuivel>      ::= ID | ID "[" <expressao> "]"
+<atribuivel>      ::= ID | <acesso_indexado>
 <atribuicao>      ::= <atribuivel> "<-" <expressao> ";"
-<cmd_leia>        ::= "leia" ID ";"
+<cmd_leia>        ::= "leia" <atribuivel> ";"
 <cmd_escreva>     ::= ("escreva" | "escreval") <expressao> ";"
 <cmd_chamada>     ::= ID "(" [ <argumentos> ] ")" ";"
 <cmd_retorna>     ::= "retorna" [ <expressao> ] ";"
 <argumentos>      ::= <expressao> { "," <expressao> }
+<acesso_indexado> ::= ID "[" <expressao> "]" [ "[" <expressao> "]" ]
 
 <cmd_se>          ::= "se" <expressao> "entao" <comandos>
                       [ "senao" <comandos> ] "fimse"
@@ -252,7 +287,7 @@ Especificação completa da gramática em [`PRD/prd.md`](PRD/prd.md).
 <expr_aditiva>    ::= <expr_mult> { ("+" | "-") <expr_mult> }
 <expr_mult>       ::= <fator> { ("*" | "div") <fator> }
 <fator>           ::= ID
-                    | ID "[" <expressao> "]"
+                    | <acesso_indexado>
                     | NUM_INT
                     | NUM_FLOAT
                     | STRING_LITERAL
@@ -265,6 +300,36 @@ Especificação completa da gramática em [`PRD/prd.md`](PRD/prd.md).
 ```
 
 Especificação completa e notas de compatibilidade continuam em [`PRD/prd.md`](PRD/prd.md).
+
+---
+
+## Regras de Assinatura
+
+- Retornos válidos: `inteiro`, `flutuante`, `vazio` e `string[n]`
+- Parâmetros escalares: `inteiro`, `flutuante`
+- `string[n]` é parâmetro por referência
+- Vetor 1D numérico usa `valor`
+- Matriz 2D numérica é passada por referência
+- Vetor ou matriz não podem ser retornados
+
+Exemplos válidos:
+
+```simples
+procedimento inteiro soma(inteiro nums[3] valor)
+inicio
+  retorna nums[0] + nums[1] + nums[2];
+fim
+
+procedimento vazio preenche(flutuante m[2][4])
+inicio
+  m[1][2] <- 3.5;
+fim
+
+procedimento string[32] nome_padrao()
+inicio
+  retorna "ana";
+fim
+```
 
 ---
 

@@ -12,12 +12,16 @@ typedef struct {
     ASTType type;
     ASTStorageKind storage;
     size_t capacity;
+    size_t dimension_count;
+    size_t row_capacity;
 } SymbolInfo;
 
 typedef struct {
     ASTType type;
     ASTStorageKind storage;
     size_t capacity;
+    size_t dimension_count;
+    size_t row_capacity;
     ASTPassMode pass_mode;
 } ParameterInfo;
 

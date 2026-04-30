@@ -77,6 +77,7 @@ void ast_expression_free(ASTExpression *expression) {
         case AST_EXPR_INDEX:
             free(expression->index_access.name);
             ast_expression_free(expression->index_access.index);
+            ast_expression_free(expression->index_access.index2);
             break;
         case AST_EXPR_CALL:
             ast_call_free(&expression->call);
@@ -112,11 +113,14 @@ void ast_command_free(ASTCommand *command) {
             } else {
                 free(command->assignment.target.indexed.name);
                 ast_expression_free(command->assignment.target.indexed.index);
+                ast_expression_free(command->assignment.target.indexed.index2);
             }
             ast_expression_free(command->assignment.expression);
             break;
         case AST_COMMAND_READ:
             free(command->read.name);
+            ast_expression_free(command->read.index);
+            ast_expression_free(command->read.index2);
             break;
         case AST_COMMAND_WRITE:
         case AST_COMMAND_WRITELN:

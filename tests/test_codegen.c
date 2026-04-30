@@ -883,6 +883,72 @@ void test_codegen_emits_local_float_vector_read_and_write(void) {
     free(assembly);
 }
 
+void test_codegen_emits_row_major_addressing_for_global_integer_matrix_element(void) {
+    char *assembly = generate_source(
+        "programa demo\n"
+        "inteiro m[2][3], x;\n"
+        "inicio\n"
+        "  m[1][2] <- 7;\n"
+        "  x <- m[1][2];\n"
+        "fim");
+
+    assert_contains(assembly, "imul eax, 3");
+    assert_contains(assembly, "add eax, ebx");
+    assert_contains(assembly, "imul eax, 4");
+    assert_contains(assembly, "lea edx, [m + eax]");
+    free(assembly);
+}
+
+void test_codegen_emits_row_major_addressing_for_local_float_matrix_element(void) {
+    char *assembly = generate_source(
+        "programa demo\n"
+        "flutuante m[2][2], total;\n"
+        "inicio\n"
+        "  m[1][0] <- 1.5;\n"
+        "  total <- m[1][0];\n"
+        "fim");
+
+    assert_contains(assembly, "imul eax, 2");
+    assert_contains(assembly, "imul eax, 8");
+    assert_contains(assembly, "fstp qword [edx]");
+    assert_contains(assembly, "fld qword [edx]");
+    free(assembly);
+}
+
+void test_codegen_emits_read_and_store_for_integer_matrix_element(void) {
+    char *assembly = generate_source(
+        "programa demo\n"
+        "inteiro m[2][3];\n"
+        "inicio\n"
+        "  leia m[1][2];\n"
+        "fim");
+
+    assert_contains(assembly, "call read_int");
+    assert_contains(assembly, "imul eax, 3");
+    assert_contains(assembly, "imul eax, 4");
+    assert_contains(assembly, "mov dword [edx], eax");
+    free(assembly);
+}
+
+void test_codegen_passes_matrix_parameter_by_reference_and_indexes_inside_procedure(void) {
+    char *assembly = generate_source(
+        "procedimento inteiro soma(inteiro nums[2][3])\n"
+        "inicio\n"
+        "  retorna nums[1][2];\n"
+        "fim\n"
+        "programa demo\n"
+        "inteiro nums[2][3], x;\n"
+        "inicio\n"
+        "  x <- soma(nums);\n"
+        "fim");
+
+    assert_contains(assembly, "mov eax, nums\n    push eax");
+    assert_contains(assembly, "mov edx, dword [ebp+8]");
+    assert_contains(assembly, "imul eax, 3");
+    assert_contains(assembly, "lea edx, [edx + eax]");
+    free(assembly);
+}
+
 void test_codegen_procedure_local_vector_and_para_temporaries_do_not_overlap(void) {
     char *assembly = generate_source(
         "procedimento vazio preenche()\n"
@@ -1205,6 +1271,10 @@ int main(void) {
     RUN_TEST(test_codegen_zero_initializes_local_integer_vector_storage);
     RUN_TEST(test_codegen_emits_local_integer_vector_read_and_write);
     RUN_TEST(test_codegen_emits_local_float_vector_read_and_write);
+    RUN_TEST(test_codegen_emits_row_major_addressing_for_global_integer_matrix_element);
+    RUN_TEST(test_codegen_emits_row_major_addressing_for_local_float_matrix_element);
+    RUN_TEST(test_codegen_emits_read_and_store_for_integer_matrix_element);
+    RUN_TEST(test_codegen_passes_matrix_parameter_by_reference_and_indexes_inside_procedure);
     RUN_TEST(test_codegen_procedure_local_vector_and_para_temporaries_do_not_overlap);
     RUN_TEST(test_codegen_emits_byte_load_for_string_indexed_read_in_main);
     RUN_TEST(test_codegen_emits_byte_store_for_string_indexed_write_in_main);

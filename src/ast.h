@@ -66,6 +66,8 @@ typedef struct {
     ASTType type;
     ASTStorageKind storage;
     size_t capacity;
+    size_t dimension_count;
+    size_t row_capacity;
     int line;
     int column;
 } ASTDeclaration;
@@ -75,6 +77,8 @@ typedef struct {
     ASTType type;
     ASTStorageKind storage;
     size_t capacity;
+    size_t dimension_count;
+    size_t row_capacity;
     ASTPassMode pass_mode;
     int line;
     int column;
@@ -91,6 +95,7 @@ typedef struct {
 typedef struct {
     char *name;
     ASTExpression *index;
+    ASTExpression *index2;
     int line;
     int column;
 } ASTIndexedAccess;
@@ -124,6 +129,9 @@ struct ASTExpression {
 
 typedef struct {
     char *name;
+    ASTExpression *index;
+    ASTExpression *index2;
+    ASTAssignmentTargetType target_type;
     int line;
     int column;
 } ASTReadCommand;

@@ -332,6 +332,50 @@ void test_semantic_accepts_declared_read_target(void) {
     token_list_free(&tokens);
 }
 
+void test_semantic_accepts_numeric_matrix_element_assignment_and_read(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro m[2][3], x;\n"
+        "inicio\n"
+        "  m[1][2] <- 7;\n"
+        "  leia m[0][1];\n"
+        "  x <- m[1][2];\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL_size_t(2, info.global_count);
+    TEST_ASSERT_EQUAL_size_t(2, info.globals[0].dimension_count);
+    TEST_ASSERT_EQUAL_size_t(3, info.globals[0].row_capacity);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_rejects_matrix_access_with_single_index(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro m[2][3], x;\n"
+        "inicio\n"
+        "  x <- m[1];\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL_STRING("Matriz 'm' requer dois indices.", error.message);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
 void test_semantic_rejects_call_with_wrong_argument_count(void) {
     const char *source =
         "procedimento inteiro soma(inteiro a, inteiro b)\n"
@@ -810,6 +854,32 @@ void test_semantic_rejects_indexed_procedure_parameter(void) {
     token_list_free(&tokens);
 }
 
+void test_semantic_accepts_matrix_reference_parameter(void) {
+    const char *source =
+        "procedimento inteiro soma(inteiro nums[2][3])\n"
+        "inicio\n"
+        "  retorna nums[1][2];\n"
+        "fim\n"
+        "programa demo\n"
+        "inteiro nums[2][3], x;\n"
+        "inicio\n"
+        "  x <- soma(nums);\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL_size_t(2, info.procedures[0].parameters[0].dimension_count);
+    TEST_ASSERT_EQUAL(AST_PASS_BY_REFERENCE, info.procedures[0].parameters[0].pass_mode);
+    TEST_ASSERT_EQUAL_size_t(3, info.procedures[0].parameters[0].row_capacity);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
 void test_semantic_collects_string_parameter_storage_and_capacity(void) {
     const char *source =
         "procedimento vazio saudacao(string nome[16])\n"
@@ -1200,6 +1270,8 @@ int main(void) {
     RUN_TEST(test_semantic_accepts_for_codegen_like_identifier_names);
     RUN_TEST(test_semantic_rejects_undeclared_read_target);
     RUN_TEST(test_semantic_accepts_declared_read_target);
+    RUN_TEST(test_semantic_accepts_numeric_matrix_element_assignment_and_read);
+    RUN_TEST(test_semantic_rejects_matrix_access_with_single_index);
     RUN_TEST(test_semantic_rejects_call_with_wrong_argument_count);
     RUN_TEST(test_semantic_rejects_access_to_global_from_procedure_scope);
     RUN_TEST(test_semantic_rejects_void_procedure_in_expression);
@@ -1222,6 +1294,7 @@ int main(void) {
     RUN_TEST(test_semantic_accepts_string_element_integer_assignment);
     RUN_TEST(test_semantic_accepts_integer_read_from_string_element);
     RUN_TEST(test_semantic_rejects_indexed_procedure_parameter);
+    RUN_TEST(test_semantic_accepts_matrix_reference_parameter);
     RUN_TEST(test_semantic_collects_string_parameter_storage_and_capacity);
     RUN_TEST(test_semantic_accepts_string_variable_argument_for_string_parameter);
     RUN_TEST(test_semantic_rejects_string_literal_argument_for_string_parameter);

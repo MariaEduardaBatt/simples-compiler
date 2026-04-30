@@ -104,6 +104,8 @@ static bool parser_oom(const Parser *parser, CompilerError *error) {
     return parser_fail_current(parser, error, "Memoria insuficiente.");
 }
 
+static ASTExpression *parse_expression(Parser *parser, CompilerError *error);
+
 static ASTExpression *parser_make_int_expression(const Token *token, int value) {
     ASTExpression *expression = calloc(1, sizeof(*expression));
 
@@ -151,7 +153,7 @@ static ASTExpression *parser_make_identifier_expression(const Token *token) {
     return expression;
 }
 
-static ASTExpression *parser_make_index_expression(const Token *token, ASTExpression *index) {
+static ASTExpression *parser_make_index_expression(const Token *token, ASTExpression *index, ASTExpression *index2) {
     ASTExpression *expression = calloc(1, sizeof(*expression));
 
     if (expression == NULL) {
@@ -167,10 +169,107 @@ static ASTExpression *parser_make_index_expression(const Token *token, ASTExpres
         return NULL;
     }
     expression->index_access.index = index;
+    expression->index_access.index2 = index2;
     expression->index_access.line = expression->line;
     expression->index_access.column = expression->column;
 
     return expression;
+}
+
+static bool parse_index_suffix(
+    Parser *parser,
+    ASTExpression **out_index,
+    ASTExpression **out_index2,
+    CompilerError *error) {
+    ASTExpression *index = NULL;
+    ASTExpression *index2 = NULL;
+
+    if (out_index == NULL || out_index2 == NULL) {
+        return parser_fail_current(parser, error, "Indice invalido.");
+    }
+
+    *out_index = NULL;
+    *out_index2 = NULL;
+
+    if (!parser_match(parser, TOK_ABRE_COL)) {
+        return true;
+    }
+
+    index = parse_expression(parser, error);
+    if (index == NULL) {
+        return false;
+    }
+
+    if (!parser_expect(parser, TOK_FECHA_COL, error, "Esperado ']'.")) {
+        ast_expression_free(index);
+        return false;
+    }
+
+    if (parser_match(parser, TOK_ABRE_COL)) {
+        index2 = parse_expression(parser, error);
+        if (index2 == NULL) {
+            ast_expression_free(index);
+            return false;
+        }
+
+        if (!parser_expect(parser, TOK_FECHA_COL, error, "Esperado ']'.")) {
+            ast_expression_free(index);
+            ast_expression_free(index2);
+            return false;
+        }
+    }
+
+    *out_index = index;
+    *out_index2 = index2;
+    return true;
+}
+
+static bool parse_indexed_access(
+    Parser *parser, const Token *name_token, ASTIndexedAccess *out_access, CompilerError *error) {
+    ASTExpression *index = NULL;
+    ASTExpression *index2 = NULL;
+
+    if (!parse_index_suffix(parser, &index, &index2, error)) {
+        return false;
+    }
+
+    if (index == NULL) {
+        return parser_fail_at(name_token, error, "Esperado indice.");
+    }
+
+    memset(out_access, 0, sizeof(*out_access));
+    out_access->name = parser_strdup(name_token != NULL ? name_token->lexeme : NULL);
+    if (out_access->name == NULL) {
+        ast_expression_free(index);
+        ast_expression_free(index2);
+        return parser_oom(parser, error);
+    }
+
+    out_access->line = name_token != NULL ? name_token->line : 1;
+    out_access->column = name_token != NULL ? name_token->column : 1;
+    out_access->index = index;
+    out_access->index2 = index2;
+    return true;
+}
+
+static bool parse_fixed_size(
+    Parser *parser, const char *expected_message, const char *invalid_message, size_t *out_size, CompilerError *error) {
+    const Token *size_token;
+    long size_value;
+
+    if (!parser_expect(parser, TOK_NUM_INT, error, expected_message)) {
+        return false;
+    }
+
+    size_token = parser_previous(parser);
+    errno = 0;
+    size_value = strtol(size_token->lexeme, NULL, 10);
+    if (errno == ERANGE || size_value <= 0) {
+        return parser_fail_at(size_token, error, invalid_message);
+    }
+
+    *out_size = (size_t)size_value;
+    return true;
 }
 
 static ASTExpression *parser_make_call_expression(const Token *token, ASTExpression **arguments, size_t argument_count) {
@@ -518,20 +617,18 @@ static ASTExpression *parse_factor(Parser *parser, CompilerError *error) {
     if (parser_match(parser, TOK_ID)) {
         ASTExpression **arguments = NULL;
         size_t argument_count = 0;
+        ASTExpression *index_expr = NULL;
+        ASTExpression *index_expr2 = NULL;
 
         token = parser_previous(parser);
-        if (parser_match(parser, TOK_ABRE_COL)) {
-            ASTExpression *index_expr = parse_expression(parser, error);
-            if (index_expr == NULL) {
-                return NULL;
-            }
-            if (!parser_expect(parser, TOK_FECHA_COL, error, "Esperado ']'.")) {
-                ast_expression_free(index_expr);
-                return NULL;
-            }
-            expression = parser_make_index_expression(token, index_expr);
+        if (!parse_index_suffix(parser, &index_expr, &index_expr2, error)) {
+            return NULL;
+        }
+        if (index_expr != NULL) {
+            expression = parser_make_index_expression(token, index_expr, index_expr2);
             if (expression == NULL) {
                 ast_expression_free(index_expr);
+                ast_expression_free(index_expr2);
                 parser_oom(parser, error);
             }
             return expression;
@@ -831,29 +928,41 @@ static bool parse_declaration_list(Parser *parser, ASTDeclaration **declarations
             declaration.column = name_token->column;
 
             if (parser_match(parser, TOK_ABRE_COL)) {
-                const Token *size_token;
-                long size_value;
+                size_t first_size = 0;
 
-                if (!parser_expect(parser, TOK_NUM_INT, error, "Esperado tamanho inteiro do vetor.")) {
-                    free(declaration.name);
-                    return false;
-                }
-
-                size_token = parser_previous(parser);
-                errno = 0;
-                size_value = strtol(size_token->lexeme, NULL, 10);
-                if (errno == ERANGE || size_value <= 0) {
-                    free(declaration.name);
-                    return parser_fail_at(size_token, error, "Tamanho de vetor invalido.");
-                }
-
-                if (!parser_expect(parser, TOK_FECHA_COL, error, "Esperado ']'.")) {
+                if (!parse_fixed_size(
+                        parser,
+                        "Esperado tamanho inteiro do vetor.",
+                        "Tamanho de vetor invalido.",
+                        &first_size,
+                        error) ||
+                    !parser_expect(parser, TOK_FECHA_COL, error, "Esperado ']'.")) {
                     free(declaration.name);
                     return false;
                 }
 
                 declaration.storage = AST_STORAGE_INDEXED;
-                declaration.capacity = (size_t)size_value;
+                declaration.capacity = first_size;
+                declaration.dimension_count = 1;
+
+                if (declaration_type != AST_TYPE_STRING && parser_match(parser, TOK_ABRE_COL)) {
+                    size_t second_size = 0;
+
+                    if (!parse_fixed_size(
+                            parser,
+                            "Esperado tamanho inteiro da matriz.",
+                            "Tamanho de matriz invalido.",
+                            &second_size,
+                            error) ||
+                        !parser_expect(parser, TOK_FECHA_COL, error, "Esperado ']'.")) {
+                        free(declaration.name);
+                        return false;
+                    }
+
+                    declaration.dimension_count = 2;
+                    declaration.row_capacity = second_size;
+                    declaration.capacity = first_size * second_size;
+                }
             }
 
             if (!parser_append_declaration(declarations, declaration_count, declaration)) {
@@ -912,29 +1021,15 @@ static bool parse_parameter_list(Parser *parser, ASTParameter **parameters, size
         parameter.column = name_token->column;
 
         if (parser_match(parser, TOK_ABRE_COL)) {
-            const Token *size_token;
-            long size_value;
+            size_t first_size = 0;
 
-            if (!parser_expect(parser, TOK_NUM_INT, error, "Esperado tamanho inteiro do vetor.")) {
-                free(parameter.name);
-                ast_parameter_list_free(*parameters, *parameter_count);
-                *parameters = NULL;
-                *parameter_count = 0;
-                return false;
-            }
-
-            size_token = parser_previous(parser);
-            errno = 0;
-            size_value = strtol(size_token->lexeme, NULL, 10);
-            if (errno == ERANGE || size_value <= 0) {
-                free(parameter.name);
-                ast_parameter_list_free(*parameters, *parameter_count);
-                *parameters = NULL;
-                *parameter_count = 0;
-                return parser_fail_at(size_token, error, "Tamanho de vetor invalido.");
-            }
-
-            if (!parser_expect(parser, TOK_FECHA_COL, error, "Esperado ']'.")) {
+            if (!parse_fixed_size(
+                    parser,
+                    "Esperado tamanho inteiro do vetor.",
+                    "Tamanho de vetor invalido.",
+                    &first_size,
+                    error) ||
+                !parser_expect(parser, TOK_FECHA_COL, error, "Esperado ']'.")) {
                 free(parameter.name);
                 ast_parameter_list_free(*parameters, *parameter_count);
                 *parameters = NULL;
@@ -943,7 +1038,30 @@ static bool parse_parameter_list(Parser *parser, ASTParameter **parameters, size
             }
 
             parameter.storage = AST_STORAGE_INDEXED;
-            parameter.capacity = (size_t)size_value;
+            parameter.capacity = first_size;
+            parameter.dimension_count = 1;
+
+            if (parameter_type != AST_TYPE_STRING && parser_match(parser, TOK_ABRE_COL)) {
+                size_t second_size = 0;
+
+                if (!parse_fixed_size(
+                        parser,
+                        "Esperado tamanho inteiro da matriz.",
+                        "Tamanho de matriz invalido.",
+                        &second_size,
+                        error) ||
+                    !parser_expect(parser, TOK_FECHA_COL, error, "Esperado ']'.")) {
+                    free(parameter.name);
+                    ast_parameter_list_free(*parameters, *parameter_count);
+                    *parameters = NULL;
+                    *parameter_count = 0;
+                    return false;
+                }
+
+                parameter.dimension_count = 2;
+                parameter.row_capacity = second_size;
+                parameter.capacity = first_size * second_size;
+            }
 
             if (parser_match(parser, TOK_VALOR)) {
                 parameter.pass_mode = AST_PASS_BY_VALUE;
@@ -1050,21 +1168,17 @@ static bool parse_command(Parser *parser, ASTCommand *command, CompilerError *er
     if (parser_match(parser, TOK_ID)) {
         const Token *name_token = parser_previous(parser);
 
-        if (parser_match(parser, TOK_ABRE_COL)) {
-            ASTExpression *index_expr;
+        if (parser_check(parser, TOK_ABRE_COL)) {
+            ASTIndexedAccess access = {0};
 
-            index_expr = parse_expression(parser, error);
-            if (index_expr == NULL) {
-                return false;
-            }
-
-            if (!parser_expect(parser, TOK_FECHA_COL, error, "Esperado ']'.")) {
-                ast_expression_free(index_expr);
+            if (!parse_indexed_access(parser, name_token, &access, error)) {
                 return false;
             }
 
             if (!parser_expect(parser, TOK_ATRIB, error, "Esperado '<-' apos indice.")) {
-                ast_expression_free(index_expr);
+                free(access.name);
+                ast_expression_free(access.index);
+                ast_expression_free(access.index2);
                 return false;
             }
 
@@ -1072,14 +1186,7 @@ static bool parse_command(Parser *parser, ASTCommand *command, CompilerError *er
             command->assignment.target.type = AST_TARGET_INDEXED;
             command->assignment.target.line = name_token->line;
             command->assignment.target.column = name_token->column;
-            command->assignment.target.indexed.name = parser_strdup(name_token->lexeme);
-            if (command->assignment.target.indexed.name == NULL) {
-                ast_expression_free(index_expr);
-                return parser_oom(parser, error);
-            }
-            command->assignment.target.indexed.line = name_token->line;
-            command->assignment.target.indexed.column = name_token->column;
-            command->assignment.target.indexed.index = index_expr;
+            command->assignment.target.indexed = access;
 
             command->assignment.expression = parse_expression(parser, error);
             if (command->assignment.expression == NULL) {
@@ -1141,6 +1248,8 @@ static bool parse_command(Parser *parser, ASTCommand *command, CompilerError *er
 
     if (parser_match(parser, TOK_LEIA)) {
         const Token *name_token;
+        ASTExpression *index = NULL;
+        ASTExpression *index2 = NULL;
 
         command->type = AST_COMMAND_READ;
         if (!parser_expect(parser, TOK_ID, error, "Esperado identificador apos 'leia'.")) {
@@ -1155,6 +1264,18 @@ static bool parse_command(Parser *parser, ASTCommand *command, CompilerError *er
 
         command->read.line = name_token->line;
         command->read.column = name_token->column;
+        command->read.target_type = AST_TARGET_IDENTIFIER;
+
+        if (!parse_index_suffix(parser, &index, &index2, error)) {
+            ast_command_free(command);
+            return false;
+        }
+
+        if (index != NULL) {
+            command->read.target_type = AST_TARGET_INDEXED;
+            command->read.index = index;
+            command->read.index2 = index2;
+        }
         return true;
     }
 

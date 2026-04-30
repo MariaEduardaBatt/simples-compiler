@@ -149,6 +149,45 @@ void test_parser_reports_error_for_leia_without_identifier(void) {
     token_list_free(&tokens);
 }
 
+void test_parser_supports_numeric_matrix_declaration_and_indexed_access(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro m[2][3], x;\n"
+        "inicio\n"
+        "  m[1][2] <- 7;\n"
+        "  x <- m[0][1];\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+
+    TEST_ASSERT_EQUAL_size_t(2, program->declaration_count);
+    TEST_ASSERT_EQUAL(AST_STORAGE_INDEXED, program->declarations[0].storage);
+    TEST_ASSERT_EQUAL_size_t(2, program->declarations[0].dimension_count);
+    TEST_ASSERT_EQUAL_size_t(3, program->declarations[0].row_capacity);
+    TEST_ASSERT_EQUAL_size_t(6, program->declarations[0].capacity);
+    TEST_ASSERT_EQUAL(AST_TARGET_INDEXED, program->commands[0].assignment.target.type);
+    TEST_ASSERT_NOT_NULL(program->commands[0].assignment.target.indexed.index2);
+    TEST_ASSERT_EQUAL(AST_EXPR_INDEX, program->commands[1].assignment.expression->type);
+    TEST_ASSERT_NOT_NULL(program->commands[1].assignment.expression->index_access.index2);
+
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_parser_supports_leia_on_matrix_element(void) {
+    const char *source = "programa demo inteiro m[2][2]; inicio leia m[1][0]; fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+
+    TEST_ASSERT_EQUAL(AST_COMMAND_READ, program->commands[0].type);
+    TEST_ASSERT_EQUAL(AST_TARGET_INDEXED, program->commands[0].read.target_type);
+    TEST_ASSERT_NOT_NULL(program->commands[0].read.index);
+    TEST_ASSERT_NOT_NULL(program->commands[0].read.index2);
+
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
 void test_parser_supports_comma_separated_integer_declarations(void) {
     const char *source = "programa demo inteiro x, y, total; inicio fim";
     TokenList tokens;
@@ -612,6 +651,8 @@ int main(void) {
     RUN_TEST(test_parser_reports_error_for_missing_command_semicolon);
     RUN_TEST(test_parser_reports_error_for_integer_literal_overflow);
     RUN_TEST(test_parser_reports_error_for_leia_without_identifier);
+    RUN_TEST(test_parser_supports_numeric_matrix_declaration_and_indexed_access);
+    RUN_TEST(test_parser_supports_leia_on_matrix_element);
     RUN_TEST(test_parser_supports_comma_separated_integer_declarations);
     RUN_TEST(test_parser_parses_escreva_and_escreval_commands);
     RUN_TEST(test_parser_preserves_parenthesized_expression_grouping);
