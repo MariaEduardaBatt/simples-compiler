@@ -20,8 +20,6 @@ Todas as fases são desenvolvidas com **TDD (Test-Driven Development)** usando o
 
 Nesta fase também são descartados espaços em branco e comentários, e reportados erros como caracteres inválidos ou literais mal formados.
 
-> **Analogia:** é como separar um texto em palavras e sinais de pontuação, sem se importar ainda com a gramática da frase.
-
 **Entrada:** texto-fonte (`.simples`) → **Saída:** fluxo de tokens.
 
 #### 2. Análise Sintática (`parser`)
@@ -29,8 +27,6 @@ Nesta fase também são descartados espaços em branco e comentários, e reporta
 Recebe o fluxo de tokens e verifica se eles **formam frases válidas** segundo a gramática da linguagem SIMPLES. Se o código estiver sintaticamente correto, o parser constrói uma **Árvore Sintática Abstrata (AST)** — uma estrutura em árvore que representa hierarquicamente os comandos, expressões e blocos do programa.
 
 Erros comuns detectados aqui: ponto-e-vírgula faltando, blocos mal aninhados, expressão sem operando, etc.
-
-> **Analogia:** é como analisar a estrutura gramatical de uma frase (sujeito, verbo, objeto) para garantir que ela faz sentido estrutural.
 
 **Entrada:** tokens → **Saída:** AST.
 
@@ -42,8 +38,6 @@ Com a AST construída, a análise semântica verifica se o programa **faz sentid
 - Compatibilidade de tipos em atribuições e operações (`inteiro` vs `flutuante`)
 - Identificadores não redeclarados no mesmo escopo
 - Procedimentos chamados com os argumentos corretos
-
-> **Analogia:** é como revisar se uma frase gramaticalmente correta também é coerente — "a pedra pensa rápido" é sintaticamente válida, mas semanticamente errada.
 
 **Entrada:** AST → **Saída:** AST anotada (com informações de tipo e símbolos) ou lista de erros semânticos.
 
@@ -57,8 +51,6 @@ A última fase traduz a AST anotada em **código Assembly NASM x86 (32-bit)** pa
 - Comandos de E/S (`leia`, `escreva`, `escreval`) → chamadas de sistema Linux via `int 0x80`
 
 O código gerado usa a convenção de registradores `eax`, `ebx`, `ecx`, `edx` e pode ser montado com `nasm` e executado diretamente em Linux 32-bit.
-
-> **Analogia:** é a tradução final para a "língua da máquina" — cada construção de alto nível vira um conjunto de instruções que o processador entende.
 
 **Entrada:** AST anotada → **Saída:** arquivo `.asm` em NASM 32-bit.
 
