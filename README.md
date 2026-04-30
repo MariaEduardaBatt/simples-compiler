@@ -200,6 +200,74 @@ Especificação completa da gramática em [`PRD/prd.md`](PRD/prd.md).
 
 ---
 
+## Gramática EBNF
+
+```ebnf
+<arquivo>         ::= { <procedimento> } <programa>
+
+<programa>        ::= "programa" ID <declaracoes_globais> "inicio" <comandos> "fim"
+
+<procedimento>    ::= "procedimento" <tipo_retorno> ID "(" [ <parametros> ] ")"
+                      "inicio" <declaracoes_locais> <comandos> "fim"
+<parametros>      ::= <parametro> { "," <parametro> }
+<parametro>       ::= <tipo> ID [ "[" NUM_INT "]" ] [ "valor" ]
+<tipo_retorno>    ::= "inteiro" | "flutuante" | "vazio" | "string" "[" NUM_INT "]"
+
+<declaracoes_globais> ::= { <declaracao> }
+<declaracoes_locais>  ::= { <declaracao> }
+<declaracao>      ::= <tipo> <item_declaracao> { "," <item_declaracao> } ";"
+<item_declaracao> ::= ID [ "[" NUM_INT "]" ]
+<tipo>            ::= "inteiro" | "flutuante" | "string"
+
+<comandos>        ::= { <comando> }
+<comando>         ::= <atribuicao>
+                    | <cmd_leia>
+                    | <cmd_escreva>
+                    | <cmd_se>
+                    | <cmd_enquanto>
+                    | <cmd_para>
+                    | <cmd_chamada>
+                    | <cmd_retorna>
+
+<atribuivel>      ::= ID | ID "[" <expressao> "]"
+<atribuicao>      ::= <atribuivel> "<-" <expressao> ";"
+<cmd_leia>        ::= "leia" ID ";"
+<cmd_escreva>     ::= ("escreva" | "escreval") <expressao> ";"
+<cmd_chamada>     ::= ID "(" [ <argumentos> ] ")" ";"
+<cmd_retorna>     ::= "retorna" [ <expressao> ] ";"
+<argumentos>      ::= <expressao> { "," <expressao> }
+
+<cmd_se>          ::= "se" <expressao> "entao" <comandos>
+                      [ "senao" <comandos> ] "fimse"
+
+<cmd_enquanto>    ::= "enquanto" <expressao> "faca" <comandos> "fimenquanto"
+
+<cmd_para>        ::= "para" ID "de" <expressao> "ate" <expressao>
+                      "passo" <expressao> "faca" <comandos> "fimpara"
+
+<expressao>       ::= <expr_logica>
+<expr_logica>     ::= <expr_relacional> { ("e" | "ou") <expr_relacional> }
+<expr_relacional> ::= <expr_aditiva> [ <op_relacional> <expr_aditiva> ]
+<op_relacional>   ::= ">" | "<" | "=" | "<>" | ">=" | "<="
+<expr_aditiva>    ::= <expr_mult> { ("+" | "-") <expr_mult> }
+<expr_mult>       ::= <fator> { ("*" | "div") <fator> }
+<fator>           ::= ID
+                    | ID "[" <expressao> "]"
+                    | NUM_INT
+                    | NUM_FLOAT
+                    | STRING_LITERAL
+                    | "inteiro" "(" <expressao> ")"
+                    | "flutuante" "(" <expressao> ")"
+                    | ID "(" [ <argumentos> ] ")"
+                    | "(" <expressao> ")"
+                    | "nao" <fator>
+                    | "-" <fator>
+```
+
+Especificação completa e notas de compatibilidade continuam em [`PRD/prd.md`](PRD/prd.md).
+
+---
+
 ## Stack Técnica
 
 | Componente | Tecnologia | Papel no projeto |
