@@ -1,0 +1,20 @@
+programa demo
+inteiro m[3][4];
+inteiro i, j;
+inicio
+  para i de 0 ate 2 passo 1 faca
+    para j de 0 ate 3 passo 1 faca
+      m[i][j] <- i * 10 + j;
+    fimpara
+  fimpara
+
+  para i de 0 ate 2 passo 1 faca
+    para j de 0 ate 3 passo 1 faca
+      escreva m[i][j];
+      se j < 3 entao
+        escreva " ";
+      fimse
+    fimpara
+    escreval "";
+  fimpara
+fim
