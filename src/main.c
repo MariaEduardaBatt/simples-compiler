@@ -162,10 +162,19 @@ cleanup:
 }
 
 int main(int argc, char **argv) {
-    if (argc != 3) {
-        fprintf(stderr, "usage: %s <input.simples> <output.asm>\n", argv[0]);
+    const char *input_path = NULL;
+    const char *output_path = NULL;
+
+    if (argc == 3) {
+        input_path = argv[1];
+        output_path = argv[2];
+    } else if (argc == 4 && strcmp(argv[2], "-o") == 0) {
+        input_path = argv[1];
+        output_path = argv[3];
+    } else {
+        fprintf(stderr, "usage: %s <input.simples> [-o] <output.asm>\n", argv[0]);
         return 1;
     }
 
-    return compile_file(argv[1], argv[2]);
+    return compile_file(input_path, output_path);
 }

@@ -119,6 +119,9 @@ static TokenType lexer_keyword_type(const char *start, size_t length) {
     if (lexer_span_is(start, length, "fimpara")) {
         return TOK_FIMPARA;
     }
+    if (lexer_span_is(start, length, "valor")) {
+        return TOK_VALOR;
+    }
     if (lexer_span_is(start, length, "e")) {
         return TOK_E;
     }

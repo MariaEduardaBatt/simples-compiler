@@ -73,6 +73,8 @@ const char *token_type_name(TokenType type) {
             return "TOK_FACA";
         case TOK_FIMPARA:
             return "TOK_FIMPARA";
+        case TOK_VALOR:
+            return "TOK_VALOR";
         case TOK_E:
             return "TOK_E";
         case TOK_OU:

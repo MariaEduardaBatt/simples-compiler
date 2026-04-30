@@ -27,6 +27,7 @@ typedef enum {
     TOK_PASSO,
     TOK_FACA,
     TOK_FIMPARA,
+    TOK_VALOR,
     TOK_ESCREVA,
     TOK_ESCREVAL,
     TOK_E,

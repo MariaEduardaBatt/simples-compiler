@@ -60,44 +60,6 @@ static char *generate_source(const char *source) {
     return assembly;
 }
 
-static char *generate_source_with_error(const char *source, CompilerError *out_error) {
-    CompilerError error = {0};
-    TokenList tokens;
-    ASTProgram *program = NULL;
-    SemanticInfo info = {0};
-    char *assembly = NULL;
-
-    token_list_init(&tokens);
-    if (!lexer_scan(source, &tokens, &error)) {
-        if (out_error != NULL) { *out_error = error; }
-        token_list_free(&tokens);
-        return NULL;
-    }
-    if (!parse_program(&tokens, &program, &error)) {
-        if (out_error != NULL) { *out_error = error; }
-        ast_program_free(program);
-        token_list_free(&tokens);
-        return NULL;
-    }
-    if (!analyze_program(program, &info, &error)) {
-        if (out_error != NULL) { *out_error = error; }
-        semantic_info_free(&info);
-        ast_program_free(program);
-        token_list_free(&tokens);
-        return NULL;
-    }
-
-    if (!codegen_generate_program(program, &info, &assembly, &error)) {
-        if (out_error != NULL) { *out_error = error; }
-        assembly = NULL;
-    }
-
-    semantic_info_free(&info);
-    ast_program_free(program);
-    token_list_free(&tokens);
-    return assembly;
-}
-
 void test_codegen_emits_direct_store_for_integer_assignment(void) {
     char *assembly = generate_source("programa demo inteiro x; inicio x <- 10; fim");
 
@@ -128,10 +90,15 @@ void test_codegen_emits_program_sections_and_helper_bodies_in_stable_order(void)
 
     assert_contains_in_order(assembly, "global _start\n\nsection .data\n", "x dd 0\n");
     assert_contains_in_order(
-        assembly, "x dd 0\n", "newline db 10\nprint_buffer times 12 db 0\nread_buffer times 16 db 0\n\nsection .text\n_start:\n");
+        assembly,
+        "x dd 0\n",
+        "newline db 10\nprint_buffer times 12 db 0\nread_buffer times 16 db 0\ntmp_int dd 0\ntmp_float dq 0.0\nflt_scale dq 1000000.0\n\nsection .text\n_start:\n");
     assert_contains_in_order(assembly, "section .text\n_start:\n", "    mov eax, 1\n    xor ebx, ebx\n    int 0x80\n");
     assert_contains_in_order(assembly, "    int 0x80\n", "\nprint_int:\n");
     assert_contains_in_order(assembly, "\nprint_int:\n", "\nprint_newline:\n");
+    assert_contains_in_order(assembly, "\nprint_newline:\n", "\nread_float:\n");
+    assert_contains_in_order(assembly, "\nread_float:\n", "\nprint_float:\n");
+    assert_contains_in_order(assembly, "\nprint_float:\n", "\nprint_string:\n");
     assert_contains(assembly, "mov edi, print_buffer + 12");
     assert_contains(assembly, "mov ecx, newline");
 
@@ -248,40 +215,153 @@ void test_codegen_reports_explicit_error_when_procedure_for_loop_slot_layout_ove
     TEST_ASSERT_EQUAL(8, error.column);
 }
 
-void test_codegen_reports_float_expression_errors_in_main_body(void) {
-    CompilerError error = {0};
-    char *assembly = generate_source_with_error("programa demo inicio escreval 1.5; fim", &error);
+void test_codegen_emits_float_read_and_write_helpers(void) {
+    char *assembly = generate_source(
+        "programa demo\n"
+        "flutuante x;\n"
+        "inicio\n"
+        "  leia x;\n"
+        "  escreva x;\n"
+        "  escreval x;\n"
+        "fim");
 
-    TEST_ASSERT_NULL(assembly);
-    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
-    TEST_ASSERT_EQUAL_STRING("Code generation for flutuante expressions is not supported yet.", error.message);
+    assert_contains(assembly, "call read_float");
+    assert_contains(assembly, "fstp qword [x]");
+    assert_contains(assembly, "call print_float");
+    assert_contains(assembly, "call print_newline");
+
+    free(assembly);
 }
 
-void test_codegen_rejects_float_read_in_main_body_with_explicit_error(void) {
-    CompilerError error = {0};
-    char *assembly = generate_source_with_error("programa demo flutuante x; inicio leia x; fim", &error);
+void test_codegen_emits_float_write_for_procedure_call_result(void) {
+    char *assembly = generate_source(
+        "procedimento flutuante dup(flutuante x)\n"
+        "inicio\n"
+        "  retorna x * 2.0;\n"
+        "fim\n"
+        "programa demo\n"
+        "flutuante y;\n"
+        "inicio\n"
+        "  y <- dup(3.5);\n"
+        "  escreval y;\n"
+        "fim");
 
-    TEST_ASSERT_NULL(assembly);
-    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
-    TEST_ASSERT_EQUAL_STRING("Code generation for flutuante values in the main program is not supported yet.", error.message);
+    assert_contains(assembly, "call proc_dup");
+    assert_contains(assembly, "call print_float");
+    assert_contains(assembly, "call print_newline");
+
+    free(assembly);
 }
 
-void test_codegen_rejects_float_assignment_via_identifier_in_main_body_with_explicit_error(void) {
-    CompilerError error = {0};
-    char *assembly = generate_source_with_error("programa demo flutuante x, y; inicio x <- y; fim", &error);
+void test_codegen_emits_float_global_storage_and_literal_assignment(void) {
+    char *assembly = generate_source(
+        "programa demo\n"
+        "flutuante x;\n"
+        "inicio\n"
+        "  x <- 1.5;\n"
+        "fim");
 
-    TEST_ASSERT_NULL(assembly);
-    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
-    TEST_ASSERT_EQUAL_STRING("Code generation for flutuante values in the main program is not supported yet.", error.message);
+    assert_contains(assembly, "x dq 0.0");
+    assert_contains(assembly, "_flt_0 dq 1.5");
+    assert_contains(assembly, "fld qword [_flt_0]");
+    assert_contains(assembly, "fstp qword [x]");
+    free(assembly);
 }
 
-void test_codegen_rejects_float_write_via_identifier_in_main_body_with_explicit_error(void) {
-    CompilerError error = {0};
-    char *assembly = generate_source_with_error("programa demo flutuante x; inicio escreval x; fim", &error);
+void test_codegen_emits_float_literal_with_decimal_point_when_value_is_integral(void) {
+    char *assembly = generate_source(
+        "programa demo\n"
+        "flutuante x;\n"
+        "inicio\n"
+        "  x <- 2.0;\n"
+        "fim");
 
-    TEST_ASSERT_NULL(assembly);
-    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
-    TEST_ASSERT_EQUAL_STRING("Code generation for flutuante values in the main program is not supported yet.", error.message);
+    assert_contains(assembly, "_flt_0 dq 2.0");
+    free(assembly);
+}
+
+void test_codegen_emits_integer_to_float_promotion_before_store(void) {
+    char *assembly = generate_source(
+        "programa demo\n"
+        "flutuante y;\n"
+        "inicio\n"
+        "  y <- 2;\n"
+        "fim");
+
+    assert_contains(assembly, "mov dword [tmp_int], 2");
+    assert_contains(assembly, "fild dword [tmp_int]");
+    assert_contains(assembly, "fstp qword [y]");
+    free(assembly);
+}
+
+void test_codegen_emits_explicit_float_to_integer_cast(void) {
+    char *assembly = generate_source(
+        "programa demo\n"
+        "inteiro x;\n"
+        "inicio\n"
+        "  x <- inteiro(1.5);\n"
+        "fim");
+
+    assert_contains(assembly, "fisttp dword [tmp_int]");
+    assert_contains(assembly, "mov eax, dword [tmp_int]");
+    assert_contains(assembly, "mov dword [x], eax");
+    free(assembly);
+}
+
+void test_codegen_emits_mixed_float_arithmetic_via_x87(void) {
+    char *assembly = generate_source(
+        "programa demo\n"
+        "inteiro x;\n"
+        "flutuante y, z;\n"
+        "inicio\n"
+        "  x <- 2;\n"
+        "  y <- 1.5;\n"
+        "  z <- x + y;\n"
+        "fim");
+
+    assert_contains(assembly, "fld qword [y]");
+    assert_contains(assembly, "mov eax, dword [x]");
+    assert_contains(assembly, "mov dword [tmp_int], eax");
+    assert_contains(assembly, "fild dword [tmp_int]");
+    assert_contains(assembly, "faddp st1, st0");
+    assert_contains(assembly, "fstp qword [z]");
+    free(assembly);
+}
+
+void test_codegen_emits_float_division_via_x87(void) {
+    char *assembly = generate_source(
+        "programa demo\n"
+        "flutuante x;\n"
+        "inicio\n"
+        "  x <- 7.5 div 2;\n"
+        "fim");
+
+    assert_contains(assembly, "fdivp st1, st0");
+    assert_contains(assembly, "fstp qword [x]");
+    free(assembly);
+}
+
+void test_codegen_emits_float_comparison_for_if_and_while_conditions(void) {
+    char *assembly = generate_source(
+        "programa demo\n"
+        "flutuante x, y;\n"
+        "inteiro ok;\n"
+        "inicio\n"
+        "  x <- 1.5;\n"
+        "  y <- 2.0;\n"
+        "  se x < y entao\n"
+        "    ok <- 1;\n"
+        "  fimse\n"
+        "  enquanto y > x faca\n"
+        "    y <- x;\n"
+        "  fimenquanto\n"
+        "fim");
+
+    assert_contains(assembly, "fcomip st0, st1");
+    assert_contains(assembly, "fstp st0");
+    assert_contains(assembly, "ja .Lfloat_true");
+    assert_contains(assembly, "jb .Lfloat_true");
+    free(assembly);
 }
 
 void test_codegen_sets_fallback_error_when_generation_fails_without_specific_diagnostic(void) {
@@ -498,42 +578,122 @@ void test_codegen_emits_call_and_stack_cleanup_for_integer_procedure(void) {
     free(assembly);
 }
 
-void test_codegen_rejects_float_procedure_with_explicit_error(void) {
-    CompilerError error = {0};
-    char *assembly = generate_source_with_error(
+void test_codegen_emits_float_procedure_stack_offsets_and_st0_return(void) {
+    char *assembly = generate_source(
         "procedimento flutuante soma(flutuante a, flutuante b)\n"
         "inicio\n"
-        "  retorna a;\n"
+        "  retorna a + b;\n"
         "fim\n"
         "programa demo\n"
+        "flutuante total;\n"
         "inicio\n"
-        "  escreval 1;\n"
-        "fim",
-        &error);
+        "  total <- soma(1.5, 2.5);\n"
+        "fim");
 
-    TEST_ASSERT_NULL(assembly);
-    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
-    TEST_ASSERT_EQUAL_STRING("Code generation for flutuante procedures is not supported yet.", error.message);
+    assert_contains(assembly, "proc_soma:");
+    assert_contains(assembly, "fld qword [ebp+8]");
+    assert_contains(assembly, "fld qword [ebp+16]");
+    assert_contains(assembly, "faddp st1, st0");
+    assert_contains(assembly, "fld qword [_flt_1]\n    sub esp, 8\n    fstp qword [esp]");
+    assert_contains(assembly, "fld qword [_flt_0]\n    sub esp, 8\n    fstp qword [esp]");
+    assert_contains(assembly, "call proc_soma\n    add esp, 16");
+    assert_contains(assembly, "fstp qword [total]");
+
+    free(assembly);
 }
 
-void test_codegen_rejects_float_local_in_procedure_with_explicit_error(void) {
-    CompilerError error = {0};
-    char *assembly = generate_source_with_error(
-        "procedimento vazio usa()\n"
+void test_codegen_promotes_integer_arguments_and_returns_for_float_procedures(void) {
+    char *assembly = generate_source(
+        "procedimento flutuante dup(flutuante x)\n"
         "inicio\n"
-        "flutuante x;\n"
-        "  x <- 1.5;\n"
-        "  retorna;\n"
+        "  retorna 2;\n"
         "fim\n"
         "programa demo\n"
+        "flutuante y;\n"
         "inicio\n"
-        "  usa();\n"
-        "fim",
-        &error);
+        "  y <- dup(1);\n"
+        "fim");
 
-    TEST_ASSERT_NULL(assembly);
-    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
-    TEST_ASSERT_EQUAL_STRING("Code generation for flutuante procedures is not supported yet.", error.message);
+    assert_contains(assembly, "mov dword [tmp_int], 1\n    fild dword [tmp_int]\n    sub esp, 8\n    fstp qword [esp]");
+    assert_contains(assembly, "call proc_dup\n    add esp, 8");
+    assert_contains(assembly, "mov dword [tmp_int], 2\n    fild dword [tmp_int]\n    jmp .proc_dup_epilogue");
+    assert_contains(assembly, "fstp qword [y]");
+
+    free(assembly);
+}
+
+void test_codegen_emits_string_return_buffer_and_value_parameter_copy(void) {
+    char *assembly = generate_source(
+        "procedimento string[24] copia(string nome[16] valor)\n"
+        "inicio\n"
+        "  retorna nome;\n"
+        "fim\n"
+        "programa demo\n"
+        "string destino[24];\n"
+        "inicio\n"
+        "  destino <- copia(\"ana\");\n"
+        "  escreval destino;\n"
+        "fim");
+
+    assert_contains(assembly, "_retstr_0 times 24 db 0");
+    assert_contains(assembly, "mov eax, _strlit_0\n    push eax\n    push _retstr_0\n    call proc_copia\n    add esp, 8");
+    assert_contains(assembly, "sub esp, 16");
+    assert_contains(assembly, "mov esi, dword [ebp+12]");
+    assert_contains(assembly, "lea edi, [ebp-16]");
+    assert_contains(assembly, "mov ecx, 16");
+    assert_contains(assembly, "rep movsb");
+    assert_contains(assembly, "mov edx, dword [ebp+8]");
+    free(assembly);
+}
+
+void test_codegen_emits_vector_value_parameter_copy(void) {
+    char *assembly = generate_source(
+        "procedimento inteiro soma(inteiro nums[3] valor)\n"
+        "inicio\n"
+        "  retorna nums[0] + nums[1] + nums[2];\n"
+        "fim\n"
+        "programa demo\n"
+        "inteiro nums[3];\n"
+        "inteiro total;\n"
+        "inicio\n"
+        "  nums[0] <- 1;\n"
+        "  nums[1] <- 2;\n"
+        "  nums[2] <- 3;\n"
+        "  total <- soma(nums);\n"
+        "fim");
+
+    assert_contains(assembly, "mov eax, nums\n    push eax\n    call proc_soma\n    add esp, 4");
+    assert_contains(assembly, "sub esp, 12");
+    assert_contains(assembly, "mov esi, dword [ebp+8]");
+    assert_contains(assembly, "lea edi, [ebp-4]");
+    assert_contains(assembly, "mov ecx, 3");
+    assert_contains(assembly, "mov dword [edi], eax");
+    assert_contains(assembly, "sub edi, 4");
+    assert_contains(assembly, "loop .Lparamcopy0");
+
+    free(assembly);
+}
+
+void test_codegen_emits_float_local_slots_inside_procedures(void) {
+    char *assembly = generate_source(
+        "procedimento flutuante identidade()\n"
+        "inicio\n"
+        "  flutuante x;\n"
+        "  x <- 1.5;\n"
+        "  retorna x;\n"
+        "fim\n"
+        "programa demo\n"
+        "flutuante y;\n"
+        "inicio\n"
+        "  y <- identidade();\n"
+        "fim");
+
+    assert_contains(assembly, "proc_identidade:");
+    assert_contains(assembly, "sub esp, 8");
+    assert_contains(assembly, "fld qword [_flt_0]\n    fstp qword [ebp-8]");
+    assert_contains(assembly, "fld qword [ebp-8]\n    jmp .proc_identidade_epilogue");
+
+    free(assembly);
 }
 
 void test_codegen_emits_void_procedure_return_without_expression(void) {
@@ -703,6 +863,23 @@ void test_codegen_emits_local_integer_vector_read_and_write(void) {
     assert_contains(assembly, "lea edx, [ebp + eax - 4]");
     assert_contains(assembly, "mov dword [edx], eax");
     assert_contains(assembly, "mov eax, dword [edx]");
+    free(assembly);
+}
+
+void test_codegen_emits_local_float_vector_read_and_write(void) {
+    char *assembly = generate_source(
+        "programa demo\n"
+        "flutuante nums[3], total;\n"
+        "inicio\n"
+        "  nums[0] <- 1.5;\n"
+        "  nums[1] <- nums[0] * 2.0;\n"
+        "  total <- nums[1];\n"
+        "  escreval total;\n"
+        "fim");
+
+    assert_contains(assembly, "imul eax, 8");
+    assert_contains(assembly, "fstp qword [edx]");
+    assert_contains(assembly, "fld qword [edx]");
     free(assembly);
 }
 
@@ -928,23 +1105,32 @@ void test_codegen_emits_string_literal_escreval_via_literal_label(void) {
     free(assembly);
 }
 
-void test_codegen_rejects_string_return_procedure_with_explicit_error(void) {
-    CompilerError error = {0};
-    char *assembly = generate_source_with_error(
-        "procedimento string saudacao()\n"
+void test_codegen_passes_string_parameter_by_address_and_uses_referenced_buffer(void) {
+    char *assembly = generate_source(
+        "procedimento vazio saudacao(string nome[8])\n"
         "inicio\n"
-        "  retorna \"oi\";\n"
+        "  escreval nome;\n"
+        "  nome[0] <- 65;\n"
+        "  nome <- \"abc\";\n"
+        "  retorna;\n"
         "fim\n"
         "programa demo\n"
+        "string nome[8];\n"
         "inicio\n"
-        "  escreval 1;\n"
-        "fim",
-        &error);
+        "  nome <- \"oi\";\n"
+        "  saudacao(nome);\n"
+        "fim");
 
-    TEST_ASSERT_NULL(assembly);
-    TEST_ASSERT_EQUAL(COMPILER_PHASE_CODEGEN, error.phase);
-    TEST_ASSERT_EQUAL_STRING(
-        "Code generation for string procedure signatures is not supported yet.", error.message);
+    assert_contains(assembly, "mov eax, nome\n    push eax\n    call proc_saudacao\n    add esp, 4");
+    assert_contains(assembly, "mov eax, dword [ebp+8]\n    call print_string");
+    assert_contains(assembly, "mov edx, dword [ebp+8]");
+    assert_contains(assembly, "add edx, eax");
+    assert_contains(assembly, "mov byte [edx], al");
+    assert_contains(assembly, "mov byte [edx], 'a'");
+    assert_contains(assembly, "mov byte [edx+1], 'b'");
+    assert_contains(assembly, "mov byte [edx+2], 'c'");
+    assert_contains(assembly, "mov byte [edx+3], 0");
+    free(assembly);
 }
 
 void test_codegen_local_string_and_scalar_have_non_overlapping_frame_offsets(void) {
@@ -982,10 +1168,15 @@ int main(void) {
     RUN_TEST(test_codegen_reports_internal_error_for_return_outside_procedure);
     RUN_TEST(test_codegen_reports_explicit_error_when_procedure_for_loop_slots_are_missing);
     RUN_TEST(test_codegen_reports_explicit_error_when_procedure_for_loop_slot_layout_overflows);
-    RUN_TEST(test_codegen_reports_float_expression_errors_in_main_body);
-    RUN_TEST(test_codegen_rejects_float_read_in_main_body_with_explicit_error);
-    RUN_TEST(test_codegen_rejects_float_assignment_via_identifier_in_main_body_with_explicit_error);
-    RUN_TEST(test_codegen_rejects_float_write_via_identifier_in_main_body_with_explicit_error);
+    RUN_TEST(test_codegen_emits_float_read_and_write_helpers);
+    RUN_TEST(test_codegen_emits_float_write_for_procedure_call_result);
+    RUN_TEST(test_codegen_emits_float_global_storage_and_literal_assignment);
+    RUN_TEST(test_codegen_emits_float_literal_with_decimal_point_when_value_is_integral);
+    RUN_TEST(test_codegen_emits_integer_to_float_promotion_before_store);
+    RUN_TEST(test_codegen_emits_explicit_float_to_integer_cast);
+    RUN_TEST(test_codegen_emits_mixed_float_arithmetic_via_x87);
+    RUN_TEST(test_codegen_emits_float_division_via_x87);
+    RUN_TEST(test_codegen_emits_float_comparison_for_if_and_while_conditions);
     RUN_TEST(test_codegen_sets_fallback_error_when_generation_fails_without_specific_diagnostic);
     RUN_TEST(test_codegen_emits_labels_and_jump_for_if_else);
     RUN_TEST(test_codegen_emits_label_and_jump_for_if_without_else);
@@ -1000,8 +1191,11 @@ int main(void) {
     RUN_TEST(test_codegen_read_int_bounds_loop_to_bytes_read);
     RUN_TEST(test_codegen_read_int_clamps_on_overflow);
     RUN_TEST(test_codegen_emits_call_and_stack_cleanup_for_integer_procedure);
-    RUN_TEST(test_codegen_rejects_float_procedure_with_explicit_error);
-    RUN_TEST(test_codegen_rejects_float_local_in_procedure_with_explicit_error);
+    RUN_TEST(test_codegen_emits_float_procedure_stack_offsets_and_st0_return);
+    RUN_TEST(test_codegen_promotes_integer_arguments_and_returns_for_float_procedures);
+    RUN_TEST(test_codegen_emits_string_return_buffer_and_value_parameter_copy);
+    RUN_TEST(test_codegen_emits_vector_value_parameter_copy);
+    RUN_TEST(test_codegen_emits_float_local_slots_inside_procedures);
     RUN_TEST(test_codegen_emits_void_procedure_return_without_expression);
     RUN_TEST(test_codegen_uses_frame_local_for_loop_temporaries_for_procedure_body);
     RUN_TEST(test_codegen_zero_initializes_procedure_locals_on_entry);
@@ -1010,6 +1204,7 @@ int main(void) {
     RUN_TEST(test_codegen_emits_scaled_addressing_for_global_integer_vector_element);
     RUN_TEST(test_codegen_zero_initializes_local_integer_vector_storage);
     RUN_TEST(test_codegen_emits_local_integer_vector_read_and_write);
+    RUN_TEST(test_codegen_emits_local_float_vector_read_and_write);
     RUN_TEST(test_codegen_procedure_local_vector_and_para_temporaries_do_not_overlap);
     RUN_TEST(test_codegen_emits_byte_load_for_string_indexed_read_in_main);
     RUN_TEST(test_codegen_emits_byte_store_for_string_indexed_write_in_main);
@@ -1024,6 +1219,6 @@ int main(void) {
     RUN_TEST(test_codegen_local_string_and_scalar_have_non_overlapping_frame_offsets);
     RUN_TEST(test_codegen_emits_string_literal_escreva_via_literal_label);
     RUN_TEST(test_codegen_emits_string_literal_escreval_via_literal_label);
-    RUN_TEST(test_codegen_rejects_string_return_procedure_with_explicit_error);
+    RUN_TEST(test_codegen_passes_string_parameter_by_address_and_uses_referenced_buffer);
     return UNITY_END();
 }

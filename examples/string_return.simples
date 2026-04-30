@@ -1,0 +1,10 @@
+procedimento string[24] copia(string nome[16] valor)
+inicio
+  retorna nome;
+fim
+programa demo
+string destino[24];
+inicio
+  destino <- copia("ana");
+  escreval destino;
+fim

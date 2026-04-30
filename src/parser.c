@@ -71,6 +71,18 @@ static bool parser_check(const Parser *parser, TokenType type) {
     return parser_current(parser)->type == type;
 }
 
+static bool parser_next_check(const Parser *parser, TokenType type) {
+    if (parser == NULL || parser->tokens == NULL) {
+        return false;
+    }
+
+    if (parser->current + 1 >= parser->tokens->count) {
+        return type == TOK_EOF;
+    }
+
+    return parser->tokens->items[parser->current + 1].type == type;
+}
+
 static bool parser_match(Parser *parser, TokenType type) {
     if (!parser_check(parser, type)) {
         return false;
@@ -180,6 +192,21 @@ static ASTExpression *parser_make_call_expression(const Token *token, ASTExpress
     expression->call.column = token != NULL ? token->column : 1;
     expression->call.arguments = arguments;
     expression->call.argument_count = argument_count;
+    return expression;
+}
+
+static ASTExpression *parser_make_cast_expression(const Token *token, ASTType target_type, ASTExpression *operand) {
+    ASTExpression *expression = calloc(1, sizeof(*expression));
+
+    if (expression == NULL) {
+        return NULL;
+    }
+
+    expression->type = AST_EXPR_CAST;
+    expression->line = token != NULL ? token->line : 1;
+    expression->column = token != NULL ? token->column : 1;
+    expression->cast.target_type = target_type;
+    expression->cast.operand = operand;
     return expression;
 }
 
@@ -333,6 +360,32 @@ static bool parse_type(Parser *parser, bool allow_void, ASTType *out_type, Compi
     return parser_fail_current(parser, error, allow_void ? "Esperado tipo de retorno." : "Esperado tipo.");
 }
 
+static bool parse_return_type(Parser *parser, ASTType *out_type, CompilerError *error) {
+    if (parser_match(parser, TOK_INTEIRO)) {
+        *out_type = AST_TYPE_INTEIRO;
+        return true;
+    }
+
+    if (parser_match(parser, TOK_FLUTUANTE)) {
+        *out_type = AST_TYPE_FLUTUANTE;
+        return true;
+    }
+
+    if (parser_match(parser, TOK_STRING)) {
+        return parser_fail_current(
+            parser,
+            error,
+            "Tipo de retorno string requer capacidade fixa, como string[32].");
+    }
+
+    if (parser_match(parser, TOK_VAZIO)) {
+        *out_type = AST_TYPE_VAZIO;
+        return true;
+    }
+
+    return parser_fail_current(parser, error, "Esperado tipo de retorno.");
+}
+
 static bool parser_is_declaration_type(const Parser *parser) {
     return parser_check(parser, TOK_INTEIRO) || parser_check(parser, TOK_FLUTUANTE) ||
            parser_check(parser, TOK_STRING);
@@ -431,6 +484,36 @@ static bool parse_argument_list(Parser *parser, ASTExpression ***arguments, size
 static ASTExpression *parse_factor(Parser *parser, CompilerError *error) {
     const Token *token;
     ASTExpression *expression;
+
+    if ((parser_check(parser, TOK_INTEIRO) || parser_check(parser, TOK_FLUTUANTE)) &&
+        parser_next_check(parser, TOK_ABRE_PAR)) {
+        ASTType target_type;
+        ASTExpression *operand;
+
+        token = parser_current(parser);
+        target_type = parser_check(parser, TOK_INTEIRO) ? AST_TYPE_INTEIRO : AST_TYPE_FLUTUANTE;
+        parser_match(parser, parser_current(parser)->type);
+        if (!parser_expect(parser, TOK_ABRE_PAR, error, "Esperado '('.") ) {
+            return NULL;
+        }
+
+        operand = parse_expression(parser, error);
+        if (operand == NULL) {
+            return NULL;
+        }
+
+        if (!parser_expect(parser, TOK_FECHA_PAR, error, "Esperado ')'.")) {
+            ast_expression_free(operand);
+            return NULL;
+        }
+
+        expression = parser_make_cast_expression(token, target_type, operand);
+        if (expression == NULL) {
+            ast_expression_free(operand);
+            parser_oom(parser, error);
+        }
+        return expression;
+    }
 
     if (parser_match(parser, TOK_ID)) {
         ASTExpression **arguments = NULL;
@@ -824,6 +907,7 @@ static bool parse_parameter_list(Parser *parser, ASTParameter **parameters, size
         }
         parameter.type = parameter_type;
         parameter.storage = AST_STORAGE_SCALAR;
+        parameter.pass_mode = AST_PASS_BY_REFERENCE;
         parameter.line = name_token->line;
         parameter.column = name_token->column;
 
@@ -860,6 +944,16 @@ static bool parse_parameter_list(Parser *parser, ASTParameter **parameters, size
 
             parameter.storage = AST_STORAGE_INDEXED;
             parameter.capacity = (size_t)size_value;
+
+            if (parser_match(parser, TOK_VALOR)) {
+                parameter.pass_mode = AST_PASS_BY_VALUE;
+            }
+        } else if (parser_match(parser, TOK_VALOR)) {
+            free(parameter.name);
+            ast_parameter_list_free(*parameters, *parameter_count);
+            *parameters = NULL;
+            *parameter_count = 0;
+            return parser_fail_current(parser, error, "Parametro escalar nao usa 'valor'.");
         }
 
         if (!parser_append_parameter(parameters, parameter_count, parameter)) {
@@ -884,12 +978,41 @@ static bool parse_parameter_list(Parser *parser, ASTParameter **parameters, size
 static bool parse_procedure(Parser *parser, ASTProcedure *procedure, CompilerError *error) {
     static const TokenType command_terminators[] = {TOK_FIM};
     const Token *name_token;
+    size_t return_capacity = 0;
 
     memset(procedure, 0, sizeof(*procedure));
 
-    if (!parser_expect(parser, TOK_PROCEDIMENTO, error, "Esperado 'procedimento'.") ||
-        !parse_type(parser, true, &procedure->return_type, error) ||
-        !parser_expect(parser, TOK_ID, error, "Esperado identificador do procedimento.")) {
+    if (!parser_expect(parser, TOK_PROCEDIMENTO, error, "Esperado 'procedimento'.")) {
+        return false;
+    }
+
+    if (parser_match(parser, TOK_STRING)) {
+        const Token *size_token;
+        long size_value;
+
+        if (!parser_expect(parser, TOK_ABRE_COL, error, "Esperado '[' apos tipo de retorno string.") ||
+            !parser_expect(parser, TOK_NUM_INT, error, "Esperado capacidade inteira do retorno string.")) {
+            return false;
+        }
+
+        size_token = parser_previous(parser);
+        errno = 0;
+        size_value = strtol(size_token->lexeme, NULL, 10);
+        if (errno == ERANGE || size_value <= 0) {
+            return parser_fail_at(size_token, error, "Capacidade de retorno string invalida.");
+        }
+
+        if (!parser_expect(parser, TOK_FECHA_COL, error, "Esperado ']' apos capacidade do retorno string.")) {
+            return false;
+        }
+
+        procedure->return_type = AST_TYPE_STRING;
+        return_capacity = (size_t)size_value;
+    } else if (!parse_return_type(parser, &procedure->return_type, error)) {
+        return false;
+    }
+
+    if (!parser_expect(parser, TOK_ID, error, "Esperado identificador do procedimento.")) {
         return false;
     }
 
@@ -900,6 +1023,7 @@ static bool parse_procedure(Parser *parser, ASTProcedure *procedure, CompilerErr
     }
     procedure->line = name_token->line;
     procedure->column = name_token->column;
+    procedure->return_capacity = return_capacity;
 
     if (!parser_expect(parser, TOK_ABRE_PAR, error, "Esperado '('.") ||
         !parse_parameter_list(parser, &procedure->parameters, &procedure->parameter_count, error) ||

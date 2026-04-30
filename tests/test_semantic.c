@@ -496,9 +496,9 @@ void test_semantic_rejects_non_void_procedure_without_return_on_all_paths(void) 
 
 void test_semantic_accepts_program_and_collects_procedure_signatures(void) {
     const char *source =
-        "procedimento flutuante identidade(flutuante valor)\n"
+        "procedimento flutuante identidade(flutuante entrada)\n"
         "inicio\n"
-        "  retorna valor;\n"
+        "  retorna entrada;\n"
         "fim\n"
         "programa demo\n"
         "flutuante total;\n"
@@ -516,7 +516,9 @@ void test_semantic_accepts_program_and_collects_procedure_signatures(void) {
     TEST_ASSERT_EQUAL_STRING("identidade", info.procedures[0].name);
     TEST_ASSERT_EQUAL(AST_TYPE_FLUTUANTE, info.procedures[0].return_type);
     TEST_ASSERT_EQUAL_size_t(1, info.procedures[0].parameter_count);
-    TEST_ASSERT_EQUAL(AST_TYPE_FLUTUANTE, info.procedures[0].parameter_types[0]);
+    TEST_ASSERT_EQUAL(AST_TYPE_FLUTUANTE, info.procedures[0].parameters[0].type);
+    TEST_ASSERT_EQUAL(AST_STORAGE_SCALAR, info.procedures[0].parameters[0].storage);
+    TEST_ASSERT_EQUAL_size_t(0, info.procedures[0].parameters[0].capacity);
 
     semantic_info_free(&info);
     ast_program_free(program);
@@ -556,7 +558,7 @@ void test_semantic_rejects_string_literal_that_exceeds_capacity(void) {
     CompilerError error = {0};
 
     TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
-    TEST_ASSERT_EQUAL_STRING("Literal de string com 4 bytes excede capacidade 4 de 'nome'.", error.message);
+    TEST_ASSERT_EQUAL_STRING("Expressao string excede capacidade 4 de 'nome'.", error.message);
 
     semantic_info_free(&info);
     ast_program_free(program);
@@ -724,7 +726,7 @@ void test_semantic_accepts_string_in_write_expression(void) {
     token_list_free(&tokens);
 }
 
-void test_semantic_rejects_string_to_string_variable_assignment(void) {
+void test_semantic_accepts_string_to_string_variable_assignment(void) {
     const char *source =
         "programa demo\n"
         "string nome[20];\n"
@@ -737,9 +739,7 @@ void test_semantic_rejects_string_to_string_variable_assignment(void) {
     SemanticInfo info = {0};
     CompilerError error = {0};
 
-    TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
-    TEST_ASSERT_EQUAL(COMPILER_PHASE_SEMANTIC, error.phase);
-    TEST_ASSERT_EQUAL_STRING("Atribuicao de string para string nao suportada.", error.message);
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
 
     semantic_info_free(&info);
     ast_program_free(program);
@@ -801,7 +801,382 @@ void test_semantic_rejects_indexed_procedure_parameter(void) {
 
     TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
     TEST_ASSERT_EQUAL(COMPILER_PHASE_SEMANTIC, error.phase);
-    TEST_ASSERT_EQUAL_STRING("Parametro 'nums' nao pode ser vetor.", error.message);
+    TEST_ASSERT_EQUAL_STRING(
+        "Parametro 'nums' em vetor requer passagem por valor.",
+        error.message);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_collects_string_parameter_storage_and_capacity(void) {
+    const char *source =
+        "procedimento vazio saudacao(string nome[16])\n"
+        "inicio\n"
+        "  escreval \"oi\";\n"
+        "fim\n"
+        "programa demo\n"
+        "inicio\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL_size_t(1, info.procedure_count);
+    TEST_ASSERT_EQUAL_size_t(1, info.procedures[0].parameter_count);
+    TEST_ASSERT_EQUAL(AST_TYPE_STRING, info.procedures[0].parameters[0].type);
+    TEST_ASSERT_EQUAL(AST_STORAGE_INDEXED, info.procedures[0].parameters[0].storage);
+    TEST_ASSERT_EQUAL_size_t(16, info.procedures[0].parameters[0].capacity);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_accepts_string_return_and_value_parameter(void) {
+    const char *source =
+        "procedimento string[24] copia(string nome[16] valor)\n"
+        "inicio\n"
+        "  retorna nome;\n"
+        "fim\n"
+        "programa demo\n"
+        "string destino[24];\n"
+        "inicio\n"
+        "  destino <- copia(\"ana\");\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL_size_t(1, info.procedure_count);
+    TEST_ASSERT_EQUAL(AST_TYPE_STRING, info.procedures[0].return_type);
+    TEST_ASSERT_EQUAL_size_t(24, info.procedures[0].return_capacity);
+    TEST_ASSERT_EQUAL(AST_PASS_BY_VALUE, info.procedures[0].parameters[0].pass_mode);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_accepts_vector_value_parameter(void) {
+    const char *source =
+        "procedimento inteiro soma(inteiro nums[3] valor)\n"
+        "inicio\n"
+        "  retorna nums[0] + nums[1] + nums[2];\n"
+        "fim\n"
+        "programa demo\n"
+        "inteiro nums[3];\n"
+        "inteiro total;\n"
+        "inicio\n"
+        "  nums[0] <- 1;\n"
+        "  nums[1] <- 2;\n"
+        "  nums[2] <- 3;\n"
+        "  total <- soma(nums);\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL_size_t(1, info.procedure_count);
+    TEST_ASSERT_EQUAL(AST_PASS_BY_VALUE, info.procedures[0].parameters[0].pass_mode);
+    TEST_ASSERT_EQUAL(AST_STORAGE_INDEXED, info.procedures[0].parameters[0].storage);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_accepts_string_variable_argument_for_string_parameter(void) {
+    const char *source =
+        "procedimento vazio saudacao(string nome[16])\n"
+        "inicio\n"
+        "  escreval nome;\n"
+        "  nome[0] <- 65;\n"
+        "  nome <- \"abc\";\n"
+        "fim\n"
+        "programa demo\n"
+        "string pessoa[16];\n"
+        "inicio\n"
+        "  pessoa <- \"ana\";\n"
+        "  saudacao(pessoa);\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_rejects_string_literal_argument_for_string_parameter(void) {
+    const char *source =
+        "procedimento vazio saudacao(string nome[16])\n"
+        "inicio\n"
+        "fim\n"
+        "programa demo\n"
+        "inicio\n"
+        "  saudacao(\"ana\");\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_SEMANTIC, error.phase);
+    TEST_ASSERT_EQUAL_STRING(
+        "Argumento 1 de 'saudacao' deve ser uma variavel string nomeada.",
+        error.message);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_rejects_string_argument_with_smaller_capacity_than_parameter(void) {
+    const char *source =
+        "procedimento vazio saudacao(string nome[16])\n"
+        "inicio\n"
+        "fim\n"
+        "programa demo\n"
+        "string pessoa[8];\n"
+        "inicio\n"
+        "  saudacao(pessoa);\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_SEMANTIC, error.phase);
+    TEST_ASSERT_EQUAL_STRING(
+        "Argumento 1 de 'saudacao' requer capacidade minima 16, mas recebeu 8.",
+        error.message);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_accepts_float_literal_assignment_in_main(void) {
+    const char *source =
+        "programa demo\n"
+        "flutuante x;\n"
+        "inicio\n"
+        "  x <- 1.5;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_accepts_integer_to_float_promotion_in_assignment(void) {
+    const char *source =
+        "programa demo\n"
+        "flutuante y;\n"
+        "inicio\n"
+        "  y <- 2;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_rejects_float_to_integer_assignment(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro x;\n"
+        "inicio\n"
+        "  x <- 1.5;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL_STRING("Variavel 'x' espera tipo 'inteiro', mas recebeu 'flutuante'.", error.message);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_accepts_explicit_float_to_integer_conversion(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro x;\n"
+        "inicio\n"
+        "  x <- inteiro(1.5);\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_accepts_mixed_integer_float_arithmetic_assignment(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro x;\n"
+        "flutuante y, z;\n"
+        "inicio\n"
+        "  x <- 2;\n"
+        "  y <- 1.5;\n"
+        "  z <- x + y;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_accepts_float_division(void) {
+    const char *source =
+        "programa demo\n"
+        "flutuante x;\n"
+        "inicio\n"
+        "  x <- 7.5 div 2;\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_accepts_integer_argument_promotion_for_float_parameter(void) {
+    const char *source =
+        "procedimento flutuante dup(flutuante x)\n"
+        "inicio\n"
+        "  retorna x;\n"
+        "fim\n"
+        "programa demo\n"
+        "flutuante y;\n"
+        "inicio\n"
+        "  y <- dup(1);\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_accepts_integer_return_promotion_for_float_procedure(void) {
+    const char *source =
+        "procedimento flutuante dois()\n"
+        "inicio\n"
+        "  retorna 2;\n"
+        "fim\n"
+        "programa demo\n"
+        "flutuante y;\n"
+        "inicio\n"
+        "  y <- dois();\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_rejects_float_return_for_integer_procedure(void) {
+    const char *source =
+        "procedimento inteiro falha()\n"
+        "inicio\n"
+        "  retorna 1.5;\n"
+        "fim\n"
+        "programa demo\n"
+        "inicio\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_FALSE(analyze_program(program, &info, &error));
+    TEST_ASSERT_EQUAL_STRING("Procedimento 'falha' deve retornar tipo 'inteiro', mas recebeu 'flutuante'.", error.message);
+
+    semantic_info_free(&info);
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_semantic_accepts_float_comparisons_in_control_flow(void) {
+    const char *source =
+        "programa demo\n"
+        "flutuante x, y;\n"
+        "inteiro ok;\n"
+        "inicio\n"
+        "  x <- 1.5;\n"
+        "  y <- 2;\n"
+        "  se x < y entao\n"
+        "    ok <- 1;\n"
+        "  fimse\n"
+        "  enquanto y > x faca\n"
+        "    y <- x;\n"
+        "  fimenquanto\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    SemanticInfo info = {0};
+    CompilerError error = {0};
+
+    TEST_ASSERT_TRUE(analyze_program(program, &info, &error));
 
     semantic_info_free(&info);
     ast_program_free(program);
@@ -843,9 +1218,25 @@ int main(void) {
     RUN_TEST(test_semantic_accepts_string_plain_assignment);
     RUN_TEST(test_semantic_accepts_string_leia_target);
     RUN_TEST(test_semantic_accepts_string_in_write_expression);
-    RUN_TEST(test_semantic_rejects_string_to_string_variable_assignment);
+    RUN_TEST(test_semantic_accepts_string_to_string_variable_assignment);
     RUN_TEST(test_semantic_accepts_string_element_integer_assignment);
     RUN_TEST(test_semantic_accepts_integer_read_from_string_element);
     RUN_TEST(test_semantic_rejects_indexed_procedure_parameter);
+    RUN_TEST(test_semantic_collects_string_parameter_storage_and_capacity);
+    RUN_TEST(test_semantic_accepts_string_variable_argument_for_string_parameter);
+    RUN_TEST(test_semantic_rejects_string_literal_argument_for_string_parameter);
+    RUN_TEST(test_semantic_rejects_string_argument_with_smaller_capacity_than_parameter);
+    RUN_TEST(test_semantic_accepts_string_return_and_value_parameter);
+    RUN_TEST(test_semantic_accepts_vector_value_parameter);
+    RUN_TEST(test_semantic_accepts_float_literal_assignment_in_main);
+    RUN_TEST(test_semantic_accepts_integer_to_float_promotion_in_assignment);
+    RUN_TEST(test_semantic_rejects_float_to_integer_assignment);
+    RUN_TEST(test_semantic_accepts_explicit_float_to_integer_conversion);
+    RUN_TEST(test_semantic_accepts_mixed_integer_float_arithmetic_assignment);
+    RUN_TEST(test_semantic_accepts_float_division);
+    RUN_TEST(test_semantic_accepts_integer_argument_promotion_for_float_parameter);
+    RUN_TEST(test_semantic_accepts_integer_return_promotion_for_float_procedure);
+    RUN_TEST(test_semantic_rejects_float_return_for_integer_procedure);
+    RUN_TEST(test_semantic_accepts_float_comparisons_in_control_flow);
     return UNITY_END();
 }

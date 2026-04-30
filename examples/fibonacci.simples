@@ -1,0 +1,41 @@
+procedimento inteiro fibonacci(inteiro n)
+inicio
+  inteiro i, a, b, tmp;
+  a <- 0;
+  b <- 1;
+  se n = 0 entao
+    retorna 0;
+  senao
+    se n = 1 entao
+      retorna 1;
+    senao
+      para i de 2 ate n passo 1 faca
+        tmp <- a + b;
+        a <- b;
+        b <- tmp;
+      fimpara
+      retorna b;
+    fimse
+  fimse
+fim
+
+programa demo
+inteiro n, i;
+inicio
+  escreva "digite o numero: ";
+  leia n;
+  se n > 46 entao
+    escreval "numero muito grande";
+  senao
+    escreva "fibonacci ate ";
+    escreva n;
+    escreval ":";
+    para i de 0 ate n passo 1 faca
+      escreva fibonacci(i);
+      se i < n entao
+        escreva " ";
+      fimse
+    fimpara
+    escreval "";
+  fimse
+fim

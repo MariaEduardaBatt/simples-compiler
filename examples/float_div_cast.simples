@@ -1,0 +1,11 @@
+programa demo
+flutuante x, y;
+inteiro i;
+inicio
+  x <- 7.5 div 2;
+  y <- 7 div 2.0;
+  i <- inteiro(x);
+  escreval x;
+  escreval y;
+  escreval i;
+fim

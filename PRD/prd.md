@@ -131,8 +131,8 @@ ld -m elf_i386 programa.o -o programa
 <procedimento>    ::= "procedimento" <tipo_retorno> ID "(" [ <parametros> ] ")"
                       "inicio" <declaracoes_locais> <comandos> "fim"
 <parametros>      ::= <parametro> { "," <parametro> }
-<parametro>       ::= <tipo> ID
-<tipo_retorno>    ::= "inteiro" | "flutuante" | "vazio"
+<parametro>       ::= <tipo> ID [ "[" NUM_INT "]" ] [ "valor" ]
+<tipo_retorno>    ::= "inteiro" | "flutuante" | "vazio" | "string" "[" NUM_INT "]"
 
 <declaracoes_globais> ::= { <declaracao> }
 <declaracoes_locais>  ::= { <declaracao> }
@@ -177,6 +177,8 @@ ld -m elf_i386 programa.o -o programa
                     | NUM_INT
                     | NUM_FLOAT
                     | STRING_LITERAL
+                    | "inteiro" "(" <expressao> ")"
+                    | "flutuante" "(" <expressao> ")"
                     | ID "(" [ <argumentos> ] ")"
                     | "(" <expressao> ")"
                     | "nao" <fator>
@@ -812,9 +814,20 @@ fim
 | `leia x` | `sys_read`  • conversão ASCII→int | syscall 3 |
 | `escreva x` | conversão int→ASCII + `sys_write` | syscall 4 |
 | `escreval x` | idem + newline ao final |  |
+| `leia x` com `x: flutuante` | `sys_read`  • conversão ASCII→float | syscall 3 |
+| `escreva x` com `x: flutuante` | conversão float→ASCII + `sys_write` | syscall 4 |
+| `escreval x` com `x: flutuante` | idem + newline ao final |  |
+| `a div b` com operandos `flutuante` | divisão real via x87 (`fdivp`) | x87 |
+| `inteiro(expr)` | conversão explícita com truncamento para `inteiro` | x87 |
 | `e` (lógico) | avaliar ambas + `and` entre flags |  |
 | `ou` (lógico) | avaliar ambas + `or` entre flags |  |
 | `nao` (lógico) | inversão do jump condicional |  |
+
+Formato inicial para saída de `flutuante`:
+
+- usa notação decimal
+- remove zeros redundantes no final da parte fracionária
+- mantém pelo menos um dígito após a vírgula/ponto decimal
 
 ---
 
@@ -851,16 +864,29 @@ Todas invocadas via `int 0x80`.
 | RF15 | Análise semântica valida assinaturas, aridade e tipos de argumentos | Alta |
 | RF16 | Análise semântica valida presença de `retorna <expressao>;` em procedimentos não-`vazio` e rejeita `retorna` com expressão em procedimentos `vazio` | Alta |
 | RF17 | Code generator produz NASM válido para chamadas e retornos de procedimentos `inteiro` | Alta |
-| RF18 | Code generator rejeita com diagnóstico explícito procedimentos `flutuante` | Alta |
+| RF18 | Code generator produz NASM válido para `flutuante` em leitura e escrita | Alta |
+| RF19 | Parser, semantic analyzer e code generator aceitam conversão explícita entre tipos numéricos | Alta |
+| RF20 | Parser, semantic analyzer e code generator aceitam retorno `string` com capacidade fixa em procedimentos | Alta |
+| RF21 | Parser, semantic analyzer e code generator aceitam parâmetros agregados por valor com cópia local | Alta |
 
 ## Out of Scope (v1.0)
 
-- Geração de código para procedimentos `flutuante` (sintaxe e semântica aceitas; backend rejeita explicitamente)
-- Assinaturas de procedimento com `string` (parâmetros e retorno)
+- Geração de código para procedimentos `flutuante` já está coberta nesta entrega
+- Parâmetros vetoriais por referência em procedimentos
 - Matrizes 2D
 - Otimizações de código (constant folding, dead code elimination)
 - Suporte a Windows (PE/COFF)
 - Recuperação de erros (modo pânico) — o compilador para no primeiro erro
+
+Regras atuais para assinaturas de procedimento:
+
+- `procedimento string[32] ...` é válido e retorna em um buffer do chamador.
+- Parâmetros `string` são permitidos apenas com capacidade fixa, como `string nome[32]`.
+- Parâmetros `string` sem `valor` representam o buffer do chamador.
+- Parâmetros agregados com `valor` usam cópia local no procedimento.
+- `flutuante` já é aceito no backend para armazenamento, expressões, chamadas, retornos e I/O.
+- Conversão explícita numérica usa `inteiro(expr)` ou `flutuante(expr)`.
+- `div` com operandos `flutuante` produz divisão real.
 
 ---
 
@@ -1035,11 +1061,11 @@ clean:
 
 - [ ]  `make test` passa com 0 falhas em todos os módulos do compilador
 - [ ]  O exemplo `fatorial.simples` compila, monta e executa corretamente
-- [ ]  O exemplo `fibonacci.simples` compila, monta e executa corretamente
+- [x]  O exemplo `fibonacci.simples` compila, monta e executa corretamente
 - [ ]  Laços aninhados geram labels únicos sem conflito
 - [ ]  Erros de variável não declarada são reportados com número de linha
 - [ ]  O `.asm` gerado não produz warnings no NASM
 - [ ]  O exemplo `procedure_sum.simples` compila, monta e executa produzindo o resultado correto
 - [ ]  O exemplo `procedure_void.simples` compila, monta e executa produzindo o resultado correto
-- [ ]  Procedimentos `flutuante` são rejeitados na geração de código com diagnóstico explícito
+- [x]  Procedimentos `flutuante` compilam, montam e executam corretamente
 - [ ]  Um arquivo sem procedimentos (só `programa`) continua compilando corretamente

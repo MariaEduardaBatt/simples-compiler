@@ -1,0 +1,14 @@
+procedimento vazio ajusta(string nome[16])
+inicio
+  escreval nome;
+  nome[0] <- 66;
+  nome <- "bia";
+fim
+
+programa demo
+string pessoa[16];
+inicio
+  pessoa <- "ana";
+  ajusta(pessoa);
+  escreval pessoa;
+fim

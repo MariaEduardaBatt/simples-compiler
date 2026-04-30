@@ -134,7 +134,7 @@ void test_lexer_scans_leia_statement(void) {
     TEST_ASSERT_TRUE(lexer_scan(source, &tokens, &error));
     TEST_ASSERT_EQUAL_size_t(4, tokens.count);
     assert_token(&tokens, 0, TOK_LEIA, "leia", 1, 1);
-    assert_token(&tokens, 1, TOK_ID, "valor", 1, 6);
+    assert_token(&tokens, 1, TOK_VALOR, "valor", 1, 6);
     assert_token(&tokens, 2, TOK_PONTO_VIRGULA, ";", 1, 11);
     assert_token(&tokens, 3, TOK_EOF, "", 1, 12);
 

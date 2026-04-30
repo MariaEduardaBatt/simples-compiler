@@ -23,6 +23,14 @@ typedef struct {
     bool inside_procedure;
 } SemanticContext;
 
+static const ProcedureSignature *find_procedure(const SemanticInfo *info, const char *name);
+static bool typed_scope_lookup(
+    const TypedScope *scope,
+    const char *name,
+    ASTType *out_type,
+    ASTStorageKind *out_storage,
+    size_t *out_capacity);
+
 static char *semantic_strdup(const char *text) {
     size_t length;
     char *copy;
@@ -57,7 +65,7 @@ void semantic_info_free(SemanticInfo *info) {
 
     for (index = 0; index < info->procedure_count; ++index) {
         free(info->procedures[index].name);
-        free(info->procedures[index].parameter_types);
+        free(info->procedures[index].parameters);
     }
 
     free(info->procedures);
@@ -118,6 +126,53 @@ static const char *semantic_type_name(ASTType type) {
             return "string";
         default:
             return "desconhecido";
+    }
+}
+
+static bool semantic_string_expression_capacity(
+    const ASTExpression *expression, const SemanticContext *ctx, size_t *out_capacity) {
+    const ProcedureSignature *signature;
+    ASTType expression_type;
+    ASTStorageKind expression_storage;
+    size_t expression_capacity;
+
+    if (expression == NULL) {
+        return false;
+    }
+
+    switch (expression->type) {
+        case AST_EXPR_STRING:
+            if (out_capacity != NULL) {
+                *out_capacity = strlen(expression->string_value) + 1;
+            }
+            return true;
+        case AST_EXPR_IDENTIFIER:
+            if (!typed_scope_lookup(
+                    ctx->scope,
+                    expression->identifier,
+                    &expression_type,
+                    &expression_storage,
+                    &expression_capacity)) {
+                return false;
+            }
+            if (expression_type != AST_TYPE_STRING || expression_storage != AST_STORAGE_INDEXED) {
+                return false;
+            }
+            if (out_capacity != NULL) {
+                *out_capacity = expression_capacity;
+            }
+            return true;
+        case AST_EXPR_CALL:
+            signature = find_procedure(ctx->info, expression->call.name);
+            if (signature == NULL || signature->return_type != AST_TYPE_STRING) {
+                return false;
+            }
+            if (out_capacity != NULL) {
+                *out_capacity = signature->return_capacity;
+            }
+            return true;
+        default:
+            return false;
     }
 }
 
@@ -275,19 +330,151 @@ static bool analyze_call(
 
     for (index = 0; index < call->argument_count; ++index) {
         ASTType argument_type;
+        ASTStorageKind argument_storage = AST_STORAGE_SCALAR;
+        size_t argument_capacity = 0;
+        const ParameterInfo *parameter = &signature->parameters[index];
+
+        if (parameter->storage == AST_STORAGE_INDEXED) {
+            if (parameter->pass_mode == AST_PASS_BY_REFERENCE) {
+                if (!analyze_expression(call->arguments[index], ctx, &argument_type, error)) {
+                    return false;
+                }
+
+                if (call->arguments[index]->type != AST_EXPR_IDENTIFIER) {
+                    snprintf(
+                        message,
+                        sizeof(message),
+                        "Argumento %zu de '%s' deve ser uma variavel string nomeada.",
+                        index + 1,
+                        call->name);
+                    return semantic_fail_expression(call->arguments[index], error, message);
+                }
+
+                if (!typed_scope_lookup(
+                        ctx->scope,
+                        call->arguments[index]->identifier,
+                        &argument_type,
+                        &argument_storage,
+                        &argument_capacity)) {
+                    snprintf(
+                        message,
+                        sizeof(message),
+                        "Identificador '%s' nao declarado.",
+                        call->arguments[index]->identifier);
+                    return semantic_fail_expression(call->arguments[index], error, message);
+                }
+
+                if (argument_type != AST_TYPE_STRING || argument_storage != AST_STORAGE_INDEXED) {
+                    snprintf(
+                        message,
+                        sizeof(message),
+                        "Argumento %zu de '%s' deve ser uma variavel string nomeada.",
+                        index + 1,
+                        call->name);
+                    return semantic_fail_expression(call->arguments[index], error, message);
+                }
+
+                if (argument_capacity < parameter->capacity) {
+                    snprintf(
+                        message,
+                        sizeof(message),
+                        "Argumento %zu de '%s' requer capacidade minima %zu, mas recebeu %zu.",
+                        index + 1,
+                        call->name,
+                        parameter->capacity,
+                        argument_capacity);
+                    return semantic_fail_expression(call->arguments[index], error, message);
+                }
+
+                continue;
+            }
+
+            if (parameter->type == AST_TYPE_STRING) {
+                if (!analyze_expression(call->arguments[index], ctx, &argument_type, error)) {
+                    return false;
+                }
+
+                if (!semantic_string_expression_capacity(call->arguments[index], ctx, &argument_capacity)) {
+                    snprintf(
+                        message,
+                        sizeof(message),
+                        "Argumento %zu de '%s' deve ser uma expressao string compativel.",
+                        index + 1,
+                        call->name);
+                    return semantic_fail_expression(call->arguments[index], error, message);
+                }
+
+                if (argument_capacity > parameter->capacity) {
+                    snprintf(
+                        message,
+                        sizeof(message),
+                        "Argumento %zu de '%s' excede capacidade %zu.",
+                        index + 1,
+                        call->name,
+                        parameter->capacity);
+                    return semantic_fail_expression(call->arguments[index], error, message);
+                }
+
+                continue;
+            }
+
+            if (call->arguments[index]->type != AST_EXPR_IDENTIFIER ||
+                !typed_scope_lookup(
+                    ctx->scope,
+                    call->arguments[index]->identifier,
+                    &argument_type,
+                    &argument_storage,
+                    &argument_capacity)) {
+                snprintf(
+                    message,
+                    sizeof(message),
+                    "Argumento %zu de '%s' deve ser uma variavel vetorial nomeada.",
+                    index + 1,
+                    call->name);
+                return semantic_fail_expression(call->arguments[index], error, message);
+            }
+
+            if (argument_type != parameter->type || argument_storage != AST_STORAGE_INDEXED) {
+                snprintf(
+                    message,
+                    sizeof(message),
+                    "Argumento %zu de '%s' deve ter tipo '%s'.",
+                    index + 1,
+                    call->name,
+                    semantic_type_name(parameter->type));
+                return semantic_fail_expression(call->arguments[index], error, message);
+            }
+
+            if (argument_capacity > parameter->capacity) {
+                snprintf(
+                    message,
+                    sizeof(message),
+                    "Argumento %zu de '%s' excede capacidade %zu.",
+                    index + 1,
+                    call->name,
+                    parameter->capacity);
+                return semantic_fail_expression(call->arguments[index], error, message);
+            }
+
+            continue;
+        }
 
         if (!analyze_expression(call->arguments[index], ctx, &argument_type, error)) {
             return false;
         }
 
-        if (argument_type != signature->parameter_types[index]) {
+        if (parameter->type == AST_TYPE_FLUTUANTE && argument_type == AST_TYPE_INTEIRO) {
+            continue;
+        }
+
+        if (argument_type != parameter->type) {
             snprintf(
                 message,
                 sizeof(message),
                 "Argumento %zu de '%s' espera tipo '%s', mas recebeu '%s'.",
                 index + 1,
                 call->name,
-                semantic_type_name(signature->parameter_types[index]),
+                semantic_type_name(parameter->type),
                 semantic_type_name(argument_type));
             return semantic_fail_expression(call->arguments[index], error, message);
         }
@@ -336,6 +523,38 @@ static bool analyze_unary_expression(
     }
 }
 
+static bool analyze_cast_expression(
+    const ASTExpression *expression,
+    const SemanticContext *ctx,
+    ASTType *out_type,
+    CompilerError *error) {
+    ASTType operand_type;
+    char message[256];
+
+    if (!analyze_expression(expression->cast.operand, ctx, &operand_type, error)) {
+        return false;
+    }
+
+    if (expression->cast.target_type != AST_TYPE_INTEIRO && expression->cast.target_type != AST_TYPE_FLUTUANTE) {
+        return semantic_fail_expression(expression, error, "Conversao explicita invalida.");
+    }
+
+    if (operand_type != AST_TYPE_INTEIRO && operand_type != AST_TYPE_FLUTUANTE) {
+        snprintf(
+            message,
+            sizeof(message),
+            "Conversao explicita para '%s' requer operando numerico, mas recebeu '%s'.",
+            semantic_type_name(expression->cast.target_type),
+            semantic_type_name(operand_type));
+        return semantic_fail_expression(expression, error, message);
+    }
+
+    if (out_type != NULL) {
+        *out_type = expression->cast.target_type;
+    }
+    return true;
+}
+
 static bool analyze_binary_expression(
     const ASTExpression *expression,
     const SemanticContext *ctx,
@@ -350,23 +569,41 @@ static bool analyze_binary_expression(
         return false;
     }
 
-    if (left_type != right_type) {
-        snprintf(
-            message,
-            sizeof(message),
-            "Operacao entre tipos '%s' e '%s' nao e permitida.",
-            semantic_type_name(left_type),
-            semantic_type_name(right_type));
-        return semantic_fail_expression(expression, error, message);
-    }
-
     switch (expression->binary.op) {
         case AST_BINARY_ADD:
         case AST_BINARY_SUB:
         case AST_BINARY_MUL:
-        case AST_BINARY_DIV:
+            if ((left_type != AST_TYPE_INTEIRO && left_type != AST_TYPE_FLUTUANTE) ||
+                (right_type != AST_TYPE_INTEIRO && right_type != AST_TYPE_FLUTUANTE)) {
+                snprintf(
+                    message,
+                    sizeof(message),
+                    "Operacao entre tipos '%s' e '%s' nao e permitida.",
+                    semantic_type_name(left_type),
+                    semantic_type_name(right_type));
+                return semantic_fail_expression(expression, error, message);
+            }
             if (out_type != NULL) {
-                *out_type = left_type;
+                *out_type = (left_type == AST_TYPE_FLUTUANTE || right_type == AST_TYPE_FLUTUANTE)
+                    ? AST_TYPE_FLUTUANTE
+                    : AST_TYPE_INTEIRO;
+            }
+            return true;
+        case AST_BINARY_DIV:
+            if ((left_type != AST_TYPE_INTEIRO && left_type != AST_TYPE_FLUTUANTE) ||
+                (right_type != AST_TYPE_INTEIRO && right_type != AST_TYPE_FLUTUANTE)) {
+                snprintf(
+                    message,
+                    sizeof(message),
+                    "Operacao entre tipos '%s' e '%s' nao e permitida.",
+                    semantic_type_name(left_type),
+                    semantic_type_name(right_type));
+                return semantic_fail_expression(expression, error, message);
+            }
+            if (out_type != NULL) {
+                *out_type = (left_type == AST_TYPE_FLUTUANTE || right_type == AST_TYPE_FLUTUANTE)
+                    ? AST_TYPE_FLUTUANTE
+                    : AST_TYPE_INTEIRO;
             }
             return true;
         case AST_BINARY_GT:
@@ -375,8 +612,31 @@ static bool analyze_binary_expression(
         case AST_BINARY_NE:
         case AST_BINARY_GE:
         case AST_BINARY_LE:
+            if ((left_type != AST_TYPE_INTEIRO && left_type != AST_TYPE_FLUTUANTE) ||
+                (right_type != AST_TYPE_INTEIRO && right_type != AST_TYPE_FLUTUANTE)) {
+                snprintf(
+                    message,
+                    sizeof(message),
+                    "Operacao entre tipos '%s' e '%s' nao e permitida.",
+                    semantic_type_name(left_type),
+                    semantic_type_name(right_type));
+                return semantic_fail_expression(expression, error, message);
+            }
+            if (out_type != NULL) {
+                *out_type = AST_TYPE_INTEIRO;
+            }
+            return true;
         case AST_BINARY_AND:
         case AST_BINARY_OR:
+            if (left_type != AST_TYPE_INTEIRO || right_type != AST_TYPE_INTEIRO) {
+                snprintf(
+                    message,
+                    sizeof(message),
+                    "Operacao entre tipos '%s' e '%s' nao e permitida.",
+                    semantic_type_name(left_type),
+                    semantic_type_name(right_type));
+                return semantic_fail_expression(expression, error, message);
+            }
             if (out_type != NULL) {
                 *out_type = AST_TYPE_INTEIRO;
             }
@@ -453,6 +713,8 @@ static bool analyze_expression(const ASTExpression *expression, const SemanticCo
             return true;
         case AST_EXPR_CALL:
             return analyze_call(&expression->call, ctx, true, out_type, error);
+        case AST_EXPR_CAST:
+            return analyze_cast_expression(expression, ctx, out_type, error);
         case AST_EXPR_UNARY:
             return analyze_unary_expression(expression, ctx, out_type, error);
         case AST_EXPR_BINARY:
@@ -515,35 +777,33 @@ static bool analyze_assignment_command(const ASTAssignmentCommand *assignment, c
     if (assignment->target.type == AST_TARGET_IDENTIFIER &&
         variable_type == AST_TYPE_STRING &&
         variable_storage == AST_STORAGE_INDEXED &&
-        assignment->expression->type == AST_EXPR_STRING) {
-        size_t literal_length = strlen(assignment->expression->string_value);
+        expression_type == AST_TYPE_STRING) {
+        size_t source_capacity = 0;
 
-        if (literal_length + 1 > variable_capacity) {
+        if (!semantic_string_expression_capacity(assignment->expression, ctx, &source_capacity)) {
+            return semantic_fail_expression(
+                assignment->expression, error, "Atribuicao de string para string nao suportada.");
+        }
+
+        if (source_capacity > variable_capacity) {
             snprintf(
                 message,
                 sizeof(message),
-                "Literal de string com %zu bytes excede capacidade %zu de '%s'.",
-                literal_length,
+                "Expressao string excede capacidade %zu de '%s'.",
                 variable_capacity,
                 target_name);
             return semantic_fail_expression(assignment->expression, error, message);
         }
     }
 
-    if (assignment->target.type == AST_TARGET_IDENTIFIER
-            && variable_type == AST_TYPE_STRING
-            && variable_storage == AST_STORAGE_INDEXED
-            && expression_type == AST_TYPE_STRING
-            && assignment->expression->type != AST_EXPR_STRING) {
-        return semantic_fail_expression(
-            assignment->expression, error, "Atribuicao de string para string nao suportada.");
-    }
-
     {
-        ASTType effective_type = (assignment->target.type == AST_TARGET_INDEXED
-                && variable_type == AST_TYPE_STRING)
+        ASTType effective_type = (assignment->target.type == AST_TARGET_INDEXED && variable_type == AST_TYPE_STRING)
             ? AST_TYPE_INTEIRO
             : variable_type;
+
+        if (effective_type == AST_TYPE_FLUTUANTE && expression_type == AST_TYPE_INTEIRO) {
+            return true;
+        }
 
         if (effective_type != expression_type) {
             snprintf(
@@ -575,6 +835,50 @@ static bool analyze_return_command(const ASTReturnCommand *command, const Semant
         return true;
     }
 
+    if (ctx->current_procedure->return_type == AST_TYPE_STRING) {
+        size_t source_capacity = 0;
+
+        if (command->expression == NULL) {
+            snprintf(
+                message,
+                sizeof(message),
+                "Procedimento '%s' deve retornar expressao do tipo 'string'.",
+                ctx->current_procedure->name);
+            return semantic_fail_at(error, command->line, command->column, message);
+        }
+
+        if (!analyze_expression(command->expression, ctx, &expression_type, error)) {
+            return false;
+        }
+
+        if (expression_type != AST_TYPE_STRING) {
+            snprintf(
+                message,
+                sizeof(message),
+                "Procedimento '%s' deve retornar tipo 'string', mas recebeu '%s'.",
+                ctx->current_procedure->name,
+                semantic_type_name(expression_type));
+            return semantic_fail_expression(command->expression, error, message);
+        }
+
+        if (!semantic_string_expression_capacity(command->expression, ctx, &source_capacity)) {
+            return semantic_fail_expression(
+                command->expression, error, "Expressao string invalida para retorno.");
+        }
+
+        if (source_capacity > ctx->current_procedure->return_capacity) {
+            snprintf(
+                message,
+                sizeof(message),
+                "Expressao string excede capacidade %zu de retorno de '%s'.",
+                ctx->current_procedure->return_capacity,
+                ctx->current_procedure->name);
+            return semantic_fail_expression(command->expression, error, message);
+        }
+
+        return true;
+    }
+
     if (command->expression == NULL) {
         snprintf(
             message,
@@ -587,6 +891,10 @@ static bool analyze_return_command(const ASTReturnCommand *command, const Semant
 
     if (!analyze_expression(command->expression, ctx, &expression_type, error)) {
         return false;
+    }
+
+    if (ctx->current_procedure->return_type == AST_TYPE_FLUTUANTE && expression_type == AST_TYPE_INTEIRO) {
+        return true;
     }
 
     if (expression_type != ctx->current_procedure->return_type) {
@@ -767,8 +1075,30 @@ static bool analyze_procedure(const ASTProcedure *procedure, const SemanticInfo 
                 error, procedure->parameters[index].line, procedure->parameters[index].column, message);
         }
 
-        if (procedure->parameters[index].storage == AST_STORAGE_INDEXED) {
-            snprintf(message, sizeof(message), "Parametro '%s' nao pode ser vetor.", procedure->parameters[index].name);
+        if (procedure->parameters[index].type == AST_TYPE_STRING) {
+            if (procedure->parameters[index].storage != AST_STORAGE_INDEXED) {
+                snprintf(
+                    message,
+                    sizeof(message),
+                    "Parametro '%s' do tipo string requer capacidade fixa.",
+                    procedure->parameters[index].name);
+                typed_scope_free(&scope);
+                return semantic_fail_at(
+                    error, procedure->parameters[index].line, procedure->parameters[index].column, message);
+            }
+        } else if (procedure->parameters[index].storage == AST_STORAGE_INDEXED) {
+            if (procedure->parameters[index].pass_mode != AST_PASS_BY_VALUE) {
+                snprintf(
+                    message,
+                    sizeof(message),
+                    "Parametro '%s' em vetor requer passagem por valor.",
+                    procedure->parameters[index].name);
+                typed_scope_free(&scope);
+                return semantic_fail_at(
+                    error, procedure->parameters[index].line, procedure->parameters[index].column, message);
+            }
+        } else if (procedure->parameters[index].pass_mode == AST_PASS_BY_VALUE) {
+            snprintf(message, sizeof(message), "Parametro '%s' escalar nao usa 'valor'.", procedure->parameters[index].name);
             typed_scope_free(&scope);
             return semantic_fail_at(
                 error, procedure->parameters[index].line, procedure->parameters[index].column, message);
@@ -778,8 +1108,8 @@ static bool analyze_procedure(const ASTProcedure *procedure, const SemanticInfo 
                 &scope,
                 procedure->parameters[index].name,
                 procedure->parameters[index].type,
-                AST_STORAGE_SCALAR,
-                0)) {
+                procedure->parameters[index].storage,
+                procedure->parameters[index].capacity)) {
             typed_scope_free(&scope);
             return semantic_fail(error, "Memoria insuficiente.");
         }
@@ -826,6 +1156,14 @@ static bool analyze_procedure(const ASTProcedure *procedure, const SemanticInfo 
         return semantic_fail_at(error, procedure->line, procedure->column, message);
     }
 
+    if (procedure->return_type == AST_TYPE_STRING && procedure->return_capacity == 0) {
+        return semantic_fail_at(
+            error,
+            procedure->line,
+            procedure->column,
+            "Procedimento string requer capacidade fixa.");
+    }
+
     return true;
 }
 
@@ -851,7 +1189,7 @@ bool analyze_program(const ASTProgram *program, SemanticInfo *out_info, Compiler
 
     for (index = 0; index < program->procedure_count; ++index) {
         ProcedureSignature *procedures;
-        ASTType *parameter_types;
+        ParameterInfo *parameters;
         size_t parameter_index;
 
         if (find_procedure(&info, program->procedures[index].name) != NULL) {
@@ -867,28 +1205,32 @@ bool analyze_program(const ASTProgram *program, SemanticInfo *out_info, Compiler
         }
         info.procedures = procedures;
 
-        parameter_types = NULL;
+        parameters = NULL;
         if (program->procedures[index].parameter_count > 0) {
-            parameter_types = malloc(program->procedures[index].parameter_count * sizeof(*parameter_types));
-            if (parameter_types == NULL) {
+            parameters = malloc(program->procedures[index].parameter_count * sizeof(*parameters));
+            if (parameters == NULL) {
                 semantic_info_free(&info);
                 return semantic_fail(error, "Memoria insuficiente.");
             }
         }
 
         for (parameter_index = 0; parameter_index < program->procedures[index].parameter_count; ++parameter_index) {
-            parameter_types[parameter_index] = program->procedures[index].parameters[parameter_index].type;
+            parameters[parameter_index].type = program->procedures[index].parameters[parameter_index].type;
+            parameters[parameter_index].storage = program->procedures[index].parameters[parameter_index].storage;
+            parameters[parameter_index].capacity = program->procedures[index].parameters[parameter_index].capacity;
+            parameters[parameter_index].pass_mode = program->procedures[index].parameters[parameter_index].pass_mode;
         }
 
         info.procedures[info.procedure_count].name = semantic_strdup(program->procedures[index].name);
         if (info.procedures[info.procedure_count].name == NULL) {
-            free(parameter_types);
+            free(parameters);
             semantic_info_free(&info);
             return semantic_fail(error, "Memoria insuficiente.");
         }
 
         info.procedures[info.procedure_count].return_type = program->procedures[index].return_type;
-        info.procedures[info.procedure_count].parameter_types = parameter_types;
+        info.procedures[info.procedure_count].return_capacity = program->procedures[index].return_capacity;
+        info.procedures[info.procedure_count].parameters = parameters;
         info.procedures[info.procedure_count].parameter_count = program->procedures[index].parameter_count;
         info.procedure_count++;
     }

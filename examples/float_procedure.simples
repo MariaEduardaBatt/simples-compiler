@@ -1,0 +1,18 @@
+procedimento flutuante media(flutuante a, flutuante b)
+inicio
+  flutuante soma;
+  soma <- a + b;
+  retorna soma * 0.5;
+fim
+
+programa demo
+inteiro ok;
+flutuante resultado;
+inicio
+  resultado <- media(2, 4.0);
+  ok <- 0;
+  se resultado > 2.0 entao
+    ok <- 1;
+  fimse
+  escreval ok;
+fim

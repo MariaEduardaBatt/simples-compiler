@@ -1,0 +1,39 @@
+procedimento vazio mostra_produto(flutuante x, flutuante y, inteiro ultimo)
+inicio
+  escreva x * y;
+  se ultimo < 9 entao
+    escreva " ";
+  fimse
+fim
+
+programa demo
+flutuante a[10], b[10];
+inteiro i;
+inicio
+  a[0] <- 1.5;
+  a[1] <- 2.0;
+  a[2] <- 3.0;
+  a[3] <- 4.0;
+  a[4] <- 5.0;
+  a[5] <- 6.0;
+  a[6] <- 7.0;
+  a[7] <- 8.0;
+  a[8] <- 9.0;
+  a[9] <- 10.0;
+
+  b[0] <- 2.0;
+  b[1] <- 1.5;
+  b[2] <- 1.0;
+  b[3] <- 0.5;
+  b[4] <- 2.0;
+  b[5] <- 1.0;
+  b[6] <- 0.5;
+  b[7] <- 2.0;
+  b[8] <- 1.5;
+  b[9] <- 1.0;
+
+  para i de 0 ate 9 passo 1 faca
+    mostra_produto(a[i], b[i], i);
+  fimpara
+  escreval "";
+fim

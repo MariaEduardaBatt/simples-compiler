@@ -420,6 +420,93 @@ void test_parser_accepts_void_call_command_and_return_without_expression(void) {
     token_list_free(&tokens);
 }
 
+void test_parser_rejects_string_procedure_return_type(void) {
+    const char *source =
+        "procedimento string saudacao()\n"
+        "inicio\n"
+        "fim\n"
+        "programa demo\n"
+        "inicio\n"
+        "fim";
+    TokenList tokens;
+    CompilerError error = {0};
+    ASTProgram *program = NULL;
+
+    scan_source(source, &tokens);
+
+    TEST_ASSERT_FALSE(parse_program(&tokens, &program, &error));
+    TEST_ASSERT_NULL(program);
+    TEST_ASSERT_EQUAL(COMPILER_PHASE_PARSER, error.phase);
+    TEST_ASSERT_EQUAL_STRING("Esperado '[' apos tipo de retorno string.", error.message);
+
+    token_list_free(&tokens);
+}
+
+void test_parser_accepts_string_parameter_with_capacity(void) {
+    const char *source =
+        "procedimento vazio saudacao(string nome[16])\n"
+        "inicio\n"
+        "fim\n"
+        "programa demo\n"
+        "inicio\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+
+    TEST_ASSERT_EQUAL_size_t(1, program->procedure_count);
+    TEST_ASSERT_EQUAL_size_t(1, program->procedures[0].parameter_count);
+    TEST_ASSERT_EQUAL(AST_TYPE_STRING, program->procedures[0].parameters[0].type);
+    TEST_ASSERT_EQUAL(AST_STORAGE_INDEXED, program->procedures[0].parameters[0].storage);
+    TEST_ASSERT_EQUAL_size_t(16, program->procedures[0].parameters[0].capacity);
+
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_parser_parses_string_return_and_value_parameter(void) {
+    const char *source =
+        "procedimento string[24] copia(string nome[16] valor)\n"
+        "inicio\n"
+        "fim\n"
+        "programa demo\n"
+        "inicio\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+
+    TEST_ASSERT_EQUAL_size_t(1, program->procedure_count);
+    TEST_ASSERT_EQUAL(AST_TYPE_STRING, program->procedures[0].return_type);
+    TEST_ASSERT_EQUAL_size_t(24, program->procedures[0].return_capacity);
+    TEST_ASSERT_EQUAL_size_t(1, program->procedures[0].parameter_count);
+    TEST_ASSERT_EQUAL(AST_TYPE_STRING, program->procedures[0].parameters[0].type);
+    TEST_ASSERT_EQUAL(AST_STORAGE_INDEXED, program->procedures[0].parameters[0].storage);
+    TEST_ASSERT_EQUAL_size_t(16, program->procedures[0].parameters[0].capacity);
+    TEST_ASSERT_EQUAL(AST_PASS_BY_VALUE, program->procedures[0].parameters[0].pass_mode);
+
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
+void test_parser_parses_explicit_numeric_conversion(void) {
+    const char *source =
+        "programa demo\n"
+        "inteiro x;\n"
+        "inicio\n"
+        "  x <- inteiro(1.5);\n"
+        "fim";
+    TokenList tokens;
+    ASTProgram *program = parse_source(source, &tokens);
+    ASTExpression *expression = program->commands[0].assignment.expression;
+
+    TEST_ASSERT_EQUAL(AST_EXPR_CAST, expression->type);
+    TEST_ASSERT_EQUAL(AST_TYPE_INTEIRO, expression->cast.target_type);
+    TEST_ASSERT_EQUAL(AST_EXPR_FLOAT, expression->cast.operand->type);
+    TEST_ASSERT_EQUAL(1.5, expression->cast.operand->float_value);
+
+    ast_program_free(program);
+    token_list_free(&tokens);
+}
+
 void test_ast_procedure_free_releases_owned_members_and_resets_fields(void) {
     ASTProcedure procedure = {0};
 
@@ -541,6 +628,10 @@ int main(void) {
     RUN_TEST(test_parser_parses_read_command_target);
     RUN_TEST(test_parser_accepts_optional_top_level_procedures_before_program);
     RUN_TEST(test_parser_accepts_void_call_command_and_return_without_expression);
+    RUN_TEST(test_parser_rejects_string_procedure_return_type);
+    RUN_TEST(test_parser_accepts_string_parameter_with_capacity);
+    RUN_TEST(test_parser_parses_string_return_and_value_parameter);
+    RUN_TEST(test_parser_parses_explicit_numeric_conversion);
     RUN_TEST(test_ast_procedure_free_releases_owned_members_and_resets_fields);
     RUN_TEST(test_parser_parses_indexed_declarations_and_indexed_assignment);
     RUN_TEST(test_parser_parses_string_literal_expression);

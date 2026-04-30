@@ -111,9 +111,25 @@ O binário principal é gerado em `build/simplesc`.
 
 ## Uso
 
+Gerando Assembly com o compilador:
+
 ```bash
 ./build/simplesc programa.simples -o programa.asm
 ```
+
+O formato antigo também continua aceito:
+
+```bash
+./build/simplesc programa.simples programa.asm
+```
+
+Para facilitar a compilação e o link final, há um wrapper interativo em `run.sh`:
+
+```bash
+./run.sh
+```
+
+Ele pergunta o arquivo SIMPLES de entrada e o binário de saída, gera o `.asm`, monta com `nasm` e linka com `ld`.
 
 Para montar e executar o código gerado em Linux:
 
@@ -137,7 +153,12 @@ inicio
 fim
 ```
 
-Mais exemplos em [`examples/`](examples/).
+Mais exemplos em [`examples/`](examples/), incluindo:
+
+- [`examples/fatorial.simples`](examples/fatorial.simples)
+- [`examples/fibonacci.simples`](examples/fibonacci.simples)
+- [`examples/vector_float_multiply.simples`](examples/vector_float_multiply.simples)
+- [`examples/float_div_cast.simples`](examples/float_div_cast.simples)
 
 ---
 

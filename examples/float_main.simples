@@ -1,0 +1,19 @@
+programa demo
+inteiro ok;
+flutuante x, y, z;
+inicio
+  x <- 1.5;
+  y <- 2;
+  z <- x + y;
+  ok <- 0;
+  se z > 3.0 entao
+    ok <- 1;
+  fimse
+  enquanto z > 3.4 faca
+    z <- x;
+  fimenquanto
+  se z = 1.5 entao
+    ok <- ok + 1;
+  fimse
+  escreval ok;
+fim

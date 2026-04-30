@@ -18,6 +18,7 @@ typedef enum {
     AST_EXPR_IDENTIFIER,
     AST_EXPR_INDEX,
     AST_EXPR_CALL,
+    AST_EXPR_CAST,
     AST_EXPR_UNARY,
     AST_EXPR_BINARY
 } ASTExpressionType;
@@ -26,6 +27,11 @@ typedef enum {
     AST_STORAGE_SCALAR,
     AST_STORAGE_INDEXED
 } ASTStorageKind;
+
+typedef enum {
+    AST_PASS_BY_REFERENCE,
+    AST_PASS_BY_VALUE
+} ASTPassMode;
 
 typedef enum {
     AST_TARGET_IDENTIFIER,
@@ -69,6 +75,7 @@ typedef struct {
     ASTType type;
     ASTStorageKind storage;
     size_t capacity;
+    ASTPassMode pass_mode;
     int line;
     int column;
 } ASTParameter;
@@ -99,6 +106,10 @@ struct ASTExpression {
         char *identifier;
         ASTIndexedAccess index_access;
         ASTCall call;
+        struct {
+            ASTType target_type;
+            ASTExpression *operand;
+        } cast;
         struct {
             ASTUnaryOp op;
             ASTExpression *operand;
@@ -200,6 +211,7 @@ struct ASTCommand {
 typedef struct {
     char *name;
     ASTType return_type;
+    size_t return_capacity;
     ASTParameter *parameters;
     size_t parameter_count;
     ASTDeclaration *local_declarations;

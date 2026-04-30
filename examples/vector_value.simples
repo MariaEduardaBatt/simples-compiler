@@ -1,0 +1,14 @@
+procedimento inteiro soma(inteiro nums[3] valor)
+inicio
+  retorna nums[0] + nums[1] + nums[2];
+fim
+programa demo
+inteiro nums[3];
+inteiro total;
+inicio
+  nums[0] <- 1;
+  nums[1] <- 2;
+  nums[2] <- 3;
+  total <- soma(nums);
+  escreval total;
+fim

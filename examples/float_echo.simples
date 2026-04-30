@@ -1,0 +1,14 @@
+procedimento flutuante dup(flutuante x)
+inicio
+  retorna x * 1.5;
+fim
+
+programa demo
+flutuante x;
+inicio
+  leia x;
+  escreval x;
+  escreval 2.25;
+  escreval -1.25;
+  escreval dup(x);
+fim

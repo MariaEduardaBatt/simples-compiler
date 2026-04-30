@@ -81,6 +81,9 @@ void ast_expression_free(ASTExpression *expression) {
         case AST_EXPR_CALL:
             ast_call_free(&expression->call);
             break;
+        case AST_EXPR_CAST:
+            ast_expression_free(expression->cast.operand);
+            break;
         case AST_EXPR_UNARY:
             ast_expression_free(expression->unary.operand);
             break;

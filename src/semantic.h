@@ -15,9 +15,17 @@ typedef struct {
 } SymbolInfo;
 
 typedef struct {
+    ASTType type;
+    ASTStorageKind storage;
+    size_t capacity;
+    ASTPassMode pass_mode;
+} ParameterInfo;
+
+typedef struct {
     char *name;
     ASTType return_type;
-    ASTType *parameter_types;
+    size_t return_capacity;
+    ParameterInfo *parameters;
     size_t parameter_count;
 } ProcedureSignature;
 

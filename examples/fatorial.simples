@@ -1,0 +1,20 @@
+procedimento inteiro fatorial(inteiro n)
+inicio
+  inteiro i, resultado;
+  resultado <- 1;
+  para i de 2 ate n passo 1 faca
+    resultado <- resultado * i;
+  fimpara
+  retorna resultado;
+fim
+
+programa demo
+inteiro x;
+inicio
+  escreva "digite o numero: ";
+  leia x;
+  escreva "fatorial de ";
+  escreva x;
+  escreva " = ";
+  escreval fatorial(x);
+fim
