@@ -4,6 +4,8 @@ Compilador da linguagem **SIMPLES** que gera código Assembly **NASM 32-bit** pa
 
 > Projeto acadêmico — Disciplina de Compiladores, IFSULDEMINAS Campus Poços de Caldas.
 
+> **Importante:** o compilador e o código gerado foram projetados para **Linux**. Em **Windows** ou **macOS**, use o ambiente definido no [`Dockerfile`](Dockerfile).
+
 ---
 
 ## Visão Geral
@@ -73,6 +75,7 @@ compiler_c/
 ├── examples/         # Programas de exemplo em SIMPLES
 ├── docs/             # Documentação
 ├── PRD/              # Product Requirements Document
+├── Dockerfile        # Ambiente Linux padronizado para uso com Docker
 ├── third_party/      # Dependências externas (Unity)
 └── Makefile          # Build e alvos de teste
 ```
@@ -86,6 +89,42 @@ compiler_c/
 - **NASM** (para montar o código gerado)
 - **ld** (linker GNU, suporte a `elf_i386`)
 - **Linux** ou ambiente compatível para executar binários 32-bit
+
+---
+
+## Ambiente suportado
+
+O projeto foi desenvolvido para **Linux**. Isso inclui:
+
+- a compilação do compilador em C
+- a montagem e linkedição do código gerado
+- a execução dos binários produzidos pelo backend
+
+Isso é necessário porque o compilador gera Assembly **NASM x86 32-bit para Linux** e usa chamadas de sistema Linux no código emitido.
+
+Se você estiver em **Windows** ou **macOS**, use o ambiente do repositório via [`Dockerfile`](Dockerfile).
+
+### Docker
+
+Crie a imagem:
+
+```bash
+docker build -t simples-compiler .
+```
+
+Inicie um shell no container e monte o diretório do projeto:
+
+```bash
+docker run --rm -it -v "$(pwd)":/workspace -w /workspace simples-compiler bash
+```
+
+No **PowerShell**, use:
+
+```powershell
+docker run --rm -it -v "${PWD}:/workspace" -w /workspace simples-compiler bash
+```
+
+Dentro do container, execute normalmente os comandos do projeto, como `make all`, `make test` e `make e2e`.
 
 ---
 
