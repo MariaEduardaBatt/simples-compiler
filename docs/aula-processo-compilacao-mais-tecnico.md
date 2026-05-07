@@ -33,7 +33,84 @@ Esse exemplo é pequeno, mas já contém os elementos necessários para discutir
 - comando `if`
 - comando de escrita
 
-## 1. Mapa das estruturas reais da AST
+## 1. FIRST/FOLLOW antes da AST
+
+Antes da AST existir, o parser ainda está decidindo **qual produção da gramática** reconheceu.
+
+É nesse ponto que entram as ideias de `FIRST`, `FOLLOW` e lookahead.
+
+Para a parte de comandos, a gramática do projeto inclui:
+
+```ebnf
+<comando>         ::= <atribuicao>
+                    | <cmd_leia>
+                    | <cmd_escreva>
+                    | <cmd_se>
+                    | <cmd_enquanto>
+                    | <cmd_para>
+                    | <cmd_chamada>
+                    | <cmd_retorna>
+
+<atribuivel>      ::= ID | <acesso_indexado>
+<atribuicao>      ::= <atribuivel> "<-" <expressao> ";"
+<cmd_chamada>     ::= ID "(" [ <argumentos> ] ")" ";"
+<acesso_indexado> ::= ID "[" <expressao> "]" [ "[" <expressao> "]" ]
+```
+
+### Onde entra o FIRST
+
+Se olharmos apenas o começo da produção:
+
+- `FIRST(<atribuicao>)` inclui `ID`
+- `FIRST(<cmd_chamada>)` também inclui `ID`
+
+Ou seja: **só o primeiro token não basta** para distinguir uma atribuição de uma chamada.
+
+É por isso que o parser real precisa olhar o próximo token depois do identificador, como acontece em `src/parser.c:1165-1235`.
+
+Na prática, a decisão fica assim:
+
+- `x <- 7;` leva a `AST_COMMAND_ASSIGNMENT`
+- `nome(...)` levaria a `AST_COMMAND_CALL`
+- `vetor[0] <- 1;` continua sendo atribuição, mas com alvo indexado
+
+### Onde entra o FOLLOW
+
+Depois que a atribuição termina, o parser precisa saber o que pode aparecer **em seguida** dentro do bloco atual.
+
+Em termos didáticos, o `FOLLOW(<atribuicao>)` ajuda a enxergar que, após a produção ser concluída, o fluxo pode continuar com:
+
+- outro comando
+- ou um token de fechamento/continuação de bloco
+
+Por isso, um exemplo secundário útil é `examples/if_then_else.simples`:
+
+```simples
+programa demo
+inteiro x;
+inicio
+  x <- -1;
+  se x > 0 entao
+    escreval x;
+  senao
+    escreval 0;
+  fimse
+fim
+```
+
+Nele, após um comando dentro do bloco do `if`, o parser pode encontrar tokens como `senao` ou `fimse`, que funcionam como marcadores de continuação ou encerramento da estrutura.
+
+### Relação com a AST
+
+O ponto principal é este:
+
+`AST_COMMAND_ASSIGNMENT` ainda não existe enquanto o parser está apenas olhando `ID`.
+
+Esse nó só aparece **depois** que a produção correta foi reconhecida.
+
+Então, `FIRST`/`FOLLOW` ajudam o parser a decidir **qual comando ele está lendo**; só depois disso a AST é construída.
+
+## 2. Mapa das estruturas reais da AST
 
 Para esse programa, as estruturas mais importantes em `src/ast.h` são:
 
@@ -59,7 +136,7 @@ Dentro dessa lista de comandos, o nosso exemplo possui:
 
 Dentro do `if`, a condição `x > 0` é uma expressão binária, e o bloco `then` contém um comando `escreval x`.
 
-## 2. AST real do programa
+## 3. AST real do programa
 
 Usando os nomes reais do projeto, a estrutura central do exemplo pode ser resumida assim:
 
@@ -151,7 +228,7 @@ ASTProgram {
 }
 ```
 
-## 3. Onde essa árvore nasce e é validada
+## 4. Onde essa árvore nasce e é validada
 
 No parser, o trecho `se x > 0 entao ... fimse` é reconhecido como um comando do tipo `AST_COMMAND_IF`. Veja a construção concreta do AST para esse caso em `src/parser.c:1302-1338`, que mostra como o parser monta o nodo `ASTIfCommand` e suas sub-estruturas.
 
@@ -172,7 +249,7 @@ Para o nosso exemplo, isso inclui confirmar que:
 
 Em outras palavras: o parser organiza a estrutura, e a semântica confirma que essa estrutura faz sentido para o compilador.
 
-## 4. Como a AST vira assembly real
+## 5. Como a AST vira assembly real
 
 Quando o codegen encontra o `AST_COMMAND_IF`, ele já não trabalha mais com palavras como `se` e `entao`.
 
@@ -235,7 +312,7 @@ call print_newline
 
 Os rótulos exatos podem variar, mas a estrutura do lowering é essa: avaliar, comparar, desviar, executar o bloco, seguir adiante.
 
-## 5. Mapeamento AST → Assembly
+## 6. Mapeamento AST → Assembly
 
 | Estrutura da AST | Papel no programa | Efeito no assembly |
 | --- | --- | --- |
@@ -245,7 +322,7 @@ Os rótulos exatos podem variar, mas a estrutura do lowering é essa: avaliar, c
 | `ASTIfCommand` | organiza condição e bloco `then` | controla emissão de rótulo e desvio |
 | `AST_COMMAND_WRITELN` | imprime `x` com quebra de linha | gera chamadas `print_int` e `print_newline` |
 
-## 6. Fechamento técnico
+## 7. Fechamento técnico
 
 Neste material, o ponto principal é que a AST não é uma abstração inventada apenas para ensino: ela é a estrutura real usada pelo compilador para organizar o programa antes da geração de código.
 
