@@ -131,3 +131,63 @@ No nosso exemplo, ela confirma pontos como:
 - **Saída:** AST validada, com apoio da tabela de símbolos
 
 Se o programa tentasse usar `y > 0` sem declarar `y`, o erro seria semântico, não léxico nem sintático.
+
+## 4. Geração de código
+
+Depois que o programa passou pelas fases anteriores, o gerador de código pode transformar a estrutura validada em assembly.
+
+No compilador SIMPLES deste repositório, a saída é um arquivo NASM x86 32-bit para Linux.
+
+No caso do `se ... entao`, a ideia geral do backend é:
+
+1. avaliar a expressão da condição
+2. comparar o resultado
+3. desviar se a condição for falsa
+4. executar o bloco do `entao` se a condição for verdadeira
+5. continuar a execução do programa
+
+### Fluxo simplificado do `se ... entao`
+
+```mermaid
+flowchart TD
+    A["Avaliar x > 0"] --> B{"Condição é verdadeira?"}
+    B -- Sim --> C["Executar escreval x"]
+    B -- Não --> D["Pular bloco do if"]
+    C --> E["Continuar programa"]
+    D --> E
+```
+
+### Intuição do assembly gerado
+
+Em vez de guardar a palavra `se`, o assembly trabalha com instruções de comparação, saltos condicionais e rótulos.
+
+Ou seja: a intenção lógica do `if` continua existindo, mas agora em uma forma que o processador entende.
+
+
+## Fechamento
+
+Podemos resumir o processo de compilação assim:
+
+- o **lexer** transforma texto em tokens
+- o **parser** transforma tokens em estrutura
+- o **semantic** verifica se essa estrutura faz sentido
+- o **codegen** transforma a estrutura validada em assembly
+
+Separar o compilador em fases ajuda porque cada etapa resolve um tipo diferente de problema.
+
+Isso facilita:
+
+- entender o compilador
+- testar cada parte isoladamente
+- localizar erros com mais precisão
+- evoluir a linguagem com mais segurança
+
+## Resumo final das entradas e saídas
+
+| Fase | Entrada | Saída |
+| --- | --- | --- |
+| Análise léxica | código-fonte | tokens |
+| Análise sintática | tokens | AST |
+| Análise semântica | AST | AST validada |
+| Geração de código | AST validada | assembly |
+
