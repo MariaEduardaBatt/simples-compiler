@@ -172,3 +172,82 @@ Para o nosso exemplo, isso inclui confirmar que:
 
 Em outras palavras: o parser organiza a estrutura, e a semântica confirma que essa estrutura faz sentido para o compilador.
 
+## 4. Como a AST vira assembly real
+
+Quando o codegen encontra o `AST_COMMAND_IF`, ele já não trabalha mais com palavras como `se` e `entao`.
+
+Nesse ponto, o compilador já possui uma estrutura interna pronta para ser baixada para assembly:
+
+- a condição está em `ASTIfCommand.condition`
+- o bloco verdadeiro está em `ASTIfCommand.then_commands`
+- o operador relacional já foi resolvido como `AST_BINARY_GT`
+
+### Fluxo de lowering do `if`
+
+```mermaid
+flowchart LR
+    A["ASTIfCommand"] --> B["generate_expression(condition)"]
+    B --> C["comparar resultado com 0"]
+    C --> D["emitir salto condicional"]
+    D --> E["emitir then_commands"]
+    E --> F["continuar execução"]
+```
+
+### Trechos representativos do assembly
+
+Para o nosso exemplo, os trechos mais importantes do assembly gerado representam estas ideias:
+
+1. carregar ou materializar o valor da expressão
+2. comparar o resultado da condição
+3. saltar se a condição for falsa
+4. executar o bloco do `then`
+5. continuar o fluxo do programa
+
+```asm
+; atribuição x <- 7
+mov dword [x], 7
+
+; condição x > 0
+mov eax, dword [x]
+push eax
+mov eax, 0
+mov ebx, eax
+pop eax
+cmp eax, ebx
+setg al
+movzx eax, al
+cmp eax, 0
+je .Lendif0
+
+; then: escreval x
+mov eax, dword [x]
+call print_int
+call print_newline
+
+.Lendif0:
+```
+
+Os rótulos exatos podem variar, mas a estrutura do lowering é essa: avaliar, comparar, desviar, executar o bloco, seguir adiante.
+
+## 5. Mapeamento AST → Assembly
+
+| Estrutura da AST | Papel no programa | Efeito no assembly |
+| --- | --- | --- |
+| `ASTDeclaration` de `x` | declara uma variável inteira | reserva/usa um símbolo associado à variável |
+| `AST_COMMAND_ASSIGNMENT` | realiza `x <- 7` | grava o literal diretamente em memória |
+| `AST_EXPR_BINARY` com `AST_BINARY_GT` | representa `x > 0` | gera comparação, `setg` e salto condicional |
+| `ASTIfCommand` | organiza condição e bloco `then` | controla emissão de rótulo e desvio |
+| `AST_COMMAND_WRITELN` | imprime `x` com quebra de linha | gera chamadas `print_int` e `print_newline` |
+
+## 6. Fechamento técnico
+
+Neste material, o ponto principal é que a AST não é uma abstração inventada apenas para ensino: ela é a estrutura real usada pelo compilador para organizar o programa antes da geração de código.
+
+O caminho do `if` no compilador pode ser lido assim:
+
+- o parser cria `AST_COMMAND_IF`
+- a condição vira `AST_EXPR_BINARY` com `AST_BINARY_GT`
+- a semântica valida a estrutura
+- o codegen transforma essa estrutura em comparação, salto e bloco emitido em assembly
+
+Ou seja: o `if` continua existindo do início ao fim do processo, mas muda de forma. Primeiro ele aparece como sintaxe da linguagem, depois como árvore estruturada, e por fim como controle de fluxo em assembly.
