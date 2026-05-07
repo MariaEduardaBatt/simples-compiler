@@ -63,6 +63,7 @@ Para o compilador, `programa`, `inteiro`, `se`, `entao` e `fimse` não são mais
 | `inteiro` | palavra-chave de tipo |
 | `x` | identificador |
 | `;` | delimitador |
+| `inicio` | palavra-chave de início de bloco |
 | `<-` | operador de atribuição |
 | `7` | literal inteiro |
 | `se` | palavra-chave de controle |
@@ -71,6 +72,7 @@ Para o compilador, `programa`, `inteiro`, `se`, `entao` e `fimse` não são mais
 | `entao` | palavra-chave |
 | `escreval` | palavra-chave de saída |
 | `fimse` | palavra-chave de fechamento |
+| `fim` | palavra-chave de fim de bloco |
 
 ### O que entra e o que sai
 
