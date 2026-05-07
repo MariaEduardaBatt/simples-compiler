@@ -107,7 +107,10 @@ ASTProgram {
     ASTCommand {
       type = AST_COMMAND_ASSIGNMENT
       assignment = ASTAssignmentCommand {
-        target = AST_TARGET_IDENTIFIER("x")
+        target = ASTAssignmentTarget {
+          type = AST_TARGET_IDENTIFIER
+          identifier = "x"
+        }
         expression = ASTExpression {
           type = AST_EXPR_INT
           int_value = 7
@@ -140,6 +143,7 @@ ASTProgram {
             }
           }
         ]
+        else_commands = []
         else_count = 0
       }
     }
