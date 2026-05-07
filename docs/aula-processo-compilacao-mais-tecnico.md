@@ -100,6 +100,8 @@ fim
 
 Nele, após um comando dentro do bloco do `if`, o parser pode encontrar tokens como `senao` ou `fimse`, que funcionam como marcadores de continuação ou encerramento da estrutura.
 
+No próprio parser (veja `src/parser.c`) isso é tratado com arrays de terminadores — por exemplo `then_terminators` e `else_terminators` — usados em conjunto com a função `parse_command_list` para decidir onde parar ao ler comandos em cada contexto. Este segundo exemplo é útil porque demonstra que o FOLLOW é contextual: `senao` atua como terminador da lista "then" (indica a transição para o bloco `else`) mas não termina a lista `else` — na lista `else` o token finalizador é `fimse`.
+
 ### Relação com a AST
 
 O ponto principal é este:
