@@ -153,7 +153,7 @@ ASTProgram {
 
 ## 3. Onde essa árvore nasce e é validada
 
-No parser, o trecho `se x > 0 entao ... fimse` é reconhecido como um comando do tipo `AST_COMMAND_IF`.
+No parser, o trecho `se x > 0 entao ... fimse` é reconhecido como um comando do tipo `AST_COMMAND_IF`. Veja a construção concreta do AST para esse caso em `src/parser.c:1302-1338`, que mostra como o parser monta o nodo `ASTIfCommand` e suas sub-estruturas.
 
 Nesse processo:
 
@@ -161,7 +161,7 @@ Nesse processo:
 - o operador `>` é armazenado como `AST_BINARY_GT`
 - os comandos dentro do bloco `then` entram no vetor `then_commands` de `ASTIfCommand`
 
-Em seguida, a análise semântica valida essa estrutura.
+Em seguida, a análise semântica valida essa estrutura (ver `src/semantic.c:1085-1108`), onde são feitas checagens de declaração, tipos e uso correto das expressões.
 
 Para o nosso exemplo, isso inclui confirmar que:
 
@@ -181,6 +181,12 @@ Nesse ponto, o compilador já possui uma estrutura interna pronta para ser baixa
 - a condição está em `ASTIfCommand.condition`
 - o bloco verdadeiro está em `ASTIfCommand.then_commands`
 - o operador relacional já foi resolvido como `AST_BINARY_GT`
+
+```mermaid
+flowchart LR
+    S["Programa SIMPLES (examples/if_then.simples)"] --> AST["AST real (src/ast.h)"]
+    AST --> ASM["Trechos de assembly (codegen)"]
+```
 
 ### Fluxo de lowering do `if`
 
