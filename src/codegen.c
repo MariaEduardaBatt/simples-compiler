@@ -3709,13 +3709,13 @@ static bool generate_helpers(StringBuilder *builder) {
                "    int 0x80\n"
                "    ret\n"
                "\n"
-                "print_newline:\n"
-                "    mov eax, 4\n"
-                "    mov ebx, 1\n"
-                "    mov ecx, newline\n"
-                "    mov edx, 1\n"
-                "    int 0x80\n"
-                "    ret\n"
+                 "print_newline:\n"
+                 "    mov eax, 4\n"
+                 "    mov ebx, 1\n"
+                 "    mov ecx, newline\n"
+                 "    mov edx, 2\n"
+                 "    int 0x80\n"
+                 "    ret\n"
                 "\n"
                 "print_flush:\n"
                 "    mov eax, 118\n"
@@ -3986,7 +3986,7 @@ bool codegen_generate_program(const ASTProgram *program, const SemanticInfo *sem
 
     if (!builder_append(
             &builder,
-            "newline db 10\nprint_buffer times 12 db 0\nread_buffer times 16 db 0\ntmp_int dd 0\ntmp_float dq 0.0\nflt_scale dq 1000000.0\n\nsection .text\n_start:\n")) {
+            "newline db 13, 10\nprint_buffer times 12 db 0\nread_buffer times 16 db 0\ntmp_int dd 0\ntmp_float dq 0.0\nflt_scale dq 1000000.0\n\nsection .text\n_start:\n")) {
         goto fail;
     }
 
