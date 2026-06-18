@@ -528,10 +528,8 @@ static bool parse_command_list(
             return false;
         }
 
-        if (parser_command_requires_semicolon(command.type) &&
-            !parser_expect(parser, TOK_PONTO_VIRGULA, error, "Esperado ';' apos comando.")) {
-            ast_command_free(&command);
-            return false;
+        if (parser_command_requires_semicolon(command.type)) {
+            parser_match(parser, TOK_PONTO_VIRGULA);
         }
 
         if (!parser_append_command(commands, command_count, command)) {
@@ -971,9 +969,7 @@ static bool parse_declaration_list(Parser *parser, ASTDeclaration **declarations
             }
         } while (parser_match(parser, TOK_VIRGULA));
 
-        if (!parser_expect(parser, TOK_PONTO_VIRGULA, error, "Esperado ';' apos declaracao.")) {
-            return false;
-        }
+        parser_match(parser, TOK_PONTO_VIRGULA);
     }
 
     return true;
