@@ -2963,11 +2963,13 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
                 };
 
                 if (rtype == AST_TYPE_FLUTUANTE) {
-                    return builder_append(builder, "    call read_float\n") &&
+                    return builder_append(builder, "    call print_flush\n") &&
+                           builder_append(builder, "    call read_float\n") &&
                            generate_float_index_store(context, &access, error);
                 }
 
-                if (!builder_append(builder, "    call read_int\n") ||
+                if (!builder_append(builder, "    call print_flush\n") ||
+                    !builder_append(builder, "    call read_int\n") ||
                     !builder_append(builder, "    push eax\n")) {
                     return false;
                 }
@@ -3045,16 +3047,19 @@ static bool generate_command(CodegenContext *context, const ASTCommand *command,
                 size_t max_read = cap > 1 ? cap - 1 : 0;
 
                 return generate_string_address(context, rname) &&
+                       builder_append(builder, "    call print_flush\n") &&
                        builder_appendf(builder, "    mov edx, %zu\n", max_read) &&
                        builder_append(builder, "    call read_string\n");
             }
 
             if (rtype == AST_TYPE_FLUTUANTE) {
-                return builder_append(builder, "    call read_float\n") &&
+                return builder_append(builder, "    call print_flush\n") &&
+                       builder_append(builder, "    call read_float\n") &&
                        generate_float_store_to_name(context, rname);
             }
 
-            return builder_append(builder, "    call read_int\n") &&
+            return builder_append(builder, "    call print_flush\n") &&
+                   builder_append(builder, "    call read_int\n") &&
                    generate_store_eax_to_name(context, rname);
         }
         case AST_COMMAND_WRITE: {
@@ -3704,20 +3709,26 @@ static bool generate_helpers(StringBuilder *builder) {
                "    int 0x80\n"
                "    ret\n"
                "\n"
-               "print_newline:\n"
-               "    mov eax, 4\n"
-               "    mov ebx, 1\n"
-               "    mov ecx, newline\n"
-               "    mov edx, 1\n"
-               "    int 0x80\n"
-               "    ret\n") &&
-           builder_append(
-               builder,
-               "\n"
-               "read_float:\n"
-               "    mov eax, 3\n"
-               "    mov ebx, 0\n"
-               "    mov ecx, read_buffer\n"
+                "print_newline:\n"
+                "    mov eax, 4\n"
+                "    mov ebx, 1\n"
+                "    mov ecx, newline\n"
+                "    mov edx, 1\n"
+                "    int 0x80\n"
+                "    ret\n"
+                "\n"
+                "print_flush:\n"
+                "    mov eax, 118\n"
+                "    mov ebx, 1\n"
+                "    int 0x80\n"
+                "    ret\n") &&
+            builder_append(
+                builder,
+                "\n"
+                "read_float:\n"
+                "    mov eax, 3\n"
+                "    mov ebx, 0\n"
+                "    mov ecx, read_buffer\n"
                "    mov edx, 16\n"
                "    int 0x80\n"
                "    cmp eax, 0\n"
